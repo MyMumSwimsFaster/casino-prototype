@@ -85,3 +85,31 @@ Der Prototyp ist als Zwischenergebnis funktionsfähig. Der Hauptworkflow funktio
 - Filterfunktion in der History
 - Benutzerkonten
 - Admin-Ansicht
+
+## Promptvorgehen / KI-Workflow
+
+Während der Entwicklung wurde KI-Unterstützung gezielt eingesetzt, um technische Probleme effizient zu lösen und die Entwicklung des Prototyps zu beschleunigen.
+
+Die KI wurde insbesondere für folgende Bereiche verwendet:
+
+- Planung der Projektstruktur in SvelteKit
+- Entwicklung des End-to-End-Workflows
+- Integration von MongoDB Atlas
+- Erstellung von API-Routen
+- Debugging von State-Management und Event-Handling
+- Deployment mit Netlify
+- Verbesserung von UI/UX und Benutzerfeedback
+- Dokumentation und technische Strukturierung
+
+Beispiele für verwendete Prompts:
+
+- „Erstelle eine modulare SvelteKit-Struktur für einen Casino-Prototypen mit mehreren Routen.“
+- „Wie implementiere ich eine persistente Speicherung von Spielrunden mit MongoDB Atlas in SvelteKit?“
+- „Wie kann ein End-to-End-Workflow für Blackjack technisch umgesetzt werden?“
+- „Analysiere den Fehler beim Deployment auf Netlify und identifiziere mögliche Ursachen.“
+- „Wie können API-Routes in SvelteKit genutzt werden, um Spielrunden serverseitig zu speichern?“
+- „Wie kann eine History-Seite erstellt werden, welche MongoDB-Daten serverseitig lädt und darstellt?“
+- „Verbessere die Benutzerführung und das visuelle Feedback im aktuellen UI.“
+- „Wie kann das bestehende Mockup technisch vereinfacht und stabil implementiert werden?“
+
+Die generierten Vorschläge wurden analysiert, getestet und an die Anforderungen des Projekts angepasst.
