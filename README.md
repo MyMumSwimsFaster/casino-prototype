@@ -1,42 +1,87 @@
-# sv
+# Casino Prototype
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+## Projektbeschreibung
 
-## Creating a project
+Diese Webanwendung ist ein Prototyp für ein einfaches Casino-Spiel. Der Hauptworkflow basiert auf Blackjack: Nutzer können einen Einsatz eingeben, eine Spielrunde starten, ein Ergebnis erhalten und die gespielten Runden in einer History einsehen.
 
-If you're seeing this, you've probably already done this step. Congrats!
+Der Prototyp wurde im Rahmen des Moduls Prototyping umgesetzt.
 
-```sh
-# create a new project
-npx sv create my-app
-```
+## Ziel des Prototyps
 
-To recreate this project with the same configuration:
+Ziel ist es, einen funktionierenden End-to-End-Workflow umzusetzen:
 
-```sh
-# recreate this project
-npx sv@0.15.3 create --template minimal --types ts --add eslint prettier tailwindcss="plugins:none" --install npm casino-prototype
-```
+1. Startseite öffnen
+2. Blackjack auswählen
+3. Einsatz eingeben
+4. Runde starten
+5. Ergebnis anzeigen
+6. Spielrunde in MongoDB speichern
+7. gespeicherte Runden in der History anzeigen
 
-## Developing
+## Verwendete Technologien
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+- SvelteKit
+- TypeScript
+- Tailwind CSS
+- MongoDB Atlas
+- Git / GitHub
+- Netlify
 
-```sh
-npm run dev
+## Hauptfunktionen
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
+- Blackjack-Runde starten
+- Einsatzbetrag eingeben
+- zufälliges Spielergebnis berechnen
+- Ergebnis speichern
+- gespeicherte Spielrunden anzeigen
+- Deployment über Netlify
 
-## Building
+## Datenbank
 
-To create a production version of your app:
+Die Spielrunden werden in MongoDB gespeichert. Pro Spielrunde werden folgende Daten gespeichert:
 
-```sh
-npm run build
-```
+- Spieltyp
+- Einsatzbetrag
+- Punktzahl Spieler
+- Punktzahl Dealer
+- Ergebnis
+- Erstellungsdatum
 
-You can preview the production build with `npm run preview`.
+## Deployment
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+Die Anwendung ist online über Netlify erreichbar:
+
+https://casino-prototype.netlify.app/
+
+## GitHub Repository
+
+https://github.com/MyMumSwimsFaster/casino-prototype
+
+## Bezug zum Mockup
+
+Das finale UI wurde vereinfacht und angepasst, damit der Hauptworkflow stabil funktioniert. Das Casino-Thema, dunkle Farbschema, Blackjack-Ablauf, Einsatz und Ergebnisanzeige wurden übernommen.
+
+## Einsatz von KI-Tools
+
+Für die Entwicklung wurde KI-Unterstützung verwendet, insbesondere für:
+
+- Strukturierung des SvelteKit-Projekts
+- Unterstützung bei der MongoDB-Anbindung
+- Erstellung und Verbesserung von Code
+- Debugging von Fehlern
+- Formulierung der Dokumentation
+
+Der Code wurde geprüft, getestet und eigenständig angepasst.
+
+## Aktueller Stand
+
+Der Prototyp ist als Zwischenergebnis funktionsfähig. Der Hauptworkflow funktioniert vollständig und die Daten werden persistent gespeichert.
+
+## Mögliche Erweiterungen
+
+- Baccarat als weiterer Workflow
+- echte Blackjack-Kartenlogik
+- Gewinn-/Verluststatistiken
+- Filterfunktion in der History
+- Benutzerkonten
+- Admin-Ansicht
