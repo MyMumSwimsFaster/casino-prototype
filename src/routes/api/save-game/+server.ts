@@ -9,14 +9,17 @@ export async function POST({ request }) {
 			game: 'baccarat',
 			bet: body.bet,
 			selectedBet: body.selectedBet,
+			playerCards: body.playerCards,   // string[], e.g. ["A♠", "7♥"]
+			bankerCards: body.bankerCards,   // string[], e.g. ["K♣", "3♦", "6♠"]
 			playerScore: body.playerScore,
 			bankerScore: body.bankerScore,
 			result: body.result,
 			playerWon: body.playerWon,
+			naturalHand: body.naturalHand,
 			createdAt: new Date()
 		});
 	} else {
-		// Blackjack (bestehende Logik unverändert)
+		// Blackjack — bestehende Logik unverändert
 		await db.collection('games').insertOne({
 			game: 'blackjack',
 			bet: body.bet,
