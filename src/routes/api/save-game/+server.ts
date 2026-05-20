@@ -5,12 +5,13 @@ export async function POST({ request }) {
 	const body = await request.json();
 
 	if (body.game === 'baccarat') {
+		// Baccarat — unverändert
 		await db.collection('games').insertOne({
 			game: 'baccarat',
 			bet: body.bet,
 			selectedBet: body.selectedBet,
-			playerCards: body.playerCards,   // string[], e.g. ["A♠", "7♥"]
-			bankerCards: body.bankerCards,   // string[], e.g. ["K♣", "3♦", "6♠"]
+			playerCards: body.playerCards,
+			bankerCards: body.bankerCards,
 			playerScore: body.playerScore,
 			bankerScore: body.bankerScore,
 			result: body.result,
@@ -19,13 +20,16 @@ export async function POST({ request }) {
 			createdAt: new Date()
 		});
 	} else {
-		// Blackjack — bestehende Logik unverändert
+		// Blackjack — neues Schema mit playerHands
+		// dealerScore und result werden als Legacy-Felder mitgespeichert,
+		// damit die History rückwärtskompatibel bleibt.
 		await db.collection('games').insertOne({
 			game: 'blackjack',
 			bet: body.bet,
-			playerScore: body.playerScore,
+			playerHands: body.playerHands,   // Array von { cards, score, bet, doubled, result }
+			dealerCards: body.dealerCards,    // string[], z.B. ["K♠", "7♥"]
 			dealerScore: body.dealerScore,
-			result: body.result,
+			result: body.result,              // Ergebnis der ersten Hand (Legacy)
 			createdAt: new Date()
 		});
 	}
