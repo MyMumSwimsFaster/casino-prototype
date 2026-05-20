@@ -1,34 +1,29 @@
-<script lang="ts">
-</script>
+<main class="min-h-screen bg-slate-950 px-6 py-16 text-white flex items-center justify-center">
+	<div class="mx-auto max-w-xl text-center">
+		<h1 class="text-6xl font-bold tracking-tight">🎰 Casino</h1>
+		<p class="mt-4 text-lg text-slate-400">Wähle ein Spiel und starte deine Runde.</p>
 
-<main class="min-h-screen bg-slate-950 text-white">
-	<section class="mx-auto flex max-w-5xl flex-col items-center px-6 py-24 text-center">
-		<p class="mb-4 rounded-full bg-emerald-500/10 px-4 py-2 text-sm text-emerald-300">
-			Übung 11 · KI-Prototyping
-		</p>
-
-		<h1 class="max-w-3xl text-5xl font-bold tracking-tight">
-			Casino Prototype
-		</h1>
-
-		<p class="mt-6 max-w-2xl text-lg text-slate-300">
-			Starte eine Blackjack-Runde, setze einen Betrag und speichere das Ergebnis in deiner Spielhistorie.
-		</p>
-
-		<div class="mt-10 flex gap-4">
+		<div class="mt-12 flex flex-col gap-4">
 			<a
 				href="/blackjack"
-				class="rounded-xl bg-emerald-500 px-6 py-3 font-semibold text-slate-950 hover:bg-emerald-400"
+				class="rounded-2xl bg-emerald-600 px-8 py-5 text-xl font-semibold transition hover:bg-emerald-500 active:scale-95"
 			>
-				Blackjack starten
+				🃏 Blackjack starten
+			</a>
+
+			<a
+				href="/baccarat"
+				class="rounded-2xl bg-emerald-700 px-8 py-5 text-xl font-semibold transition hover:bg-emerald-600 active:scale-95"
+			>
+				🎴 Baccarat starten
 			</a>
 
 			<a
 				href="/history"
-				class="rounded-xl border border-slate-700 px-6 py-3 font-semibold text-white hover:bg-slate-900"
+				class="rounded-2xl border border-slate-700 bg-slate-900 px-8 py-5 text-xl font-semibold transition hover:bg-slate-800 active:scale-95"
 			>
-				History ansehen
+				📜 History
 			</a>
 		</div>
-	</section>
+	</div>
 </main>
