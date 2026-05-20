@@ -1,6 +1,10 @@
 <script lang="ts">
 	let { data } = $props();
 
+	// Lokale Kopie der Games — wird nach Clear geleert
+	let games = $state(data.games);
+	let errorMsg = $state('');
+
 	function isRed(suit: string): boolean {
 		return suit === '♥' || suit === '♦';
 	}
@@ -28,17 +32,55 @@
 			default:            return result ?? '—';
 		}
 	}
+
+	async function clearHistory() {
+		const confirmed = confirm('Are you sure you want to delete all history?');
+		if (!confirmed) return;
+
+		errorMsg = '';
+		try {
+			const res = await fetch('/api/clear-history', { method: 'POST' });
+			if (!res.ok) throw new Error(`Server error: ${res.status}`);
+			games = [];
+		} catch (e) {
+			errorMsg = 'Failed to clear history. Please try again.';
+			console.error(e);
+		}
+	}
 </script>
 
 <main class="min-h-screen bg-slate-950 px-6 py-16 text-white">
 	<div class="mx-auto max-w-5xl">
 		<a href="/" class="text-sm text-emerald-400 hover:underline">← Zurück zur Startseite</a>
 
-		<h1 class="mt-6 text-5xl font-bold">Game History</h1>
-		<p class="mt-4 text-lg text-slate-300">Alle gespeicherten Runden.</p>
+		<div class="mt-6 flex items-end justify-between gap-4">
+			<div>
+				<h1 class="text-5xl font-bold">Game History</h1>
+				<p class="mt-4 text-lg text-slate-300">Alle gespeicherten Runden.</p>
+			</div>
+
+			{#if games.length > 0}
+				<button
+					onclick={clearHistory}
+					class="shrink-0 rounded-xl border border-red-800 bg-red-950 px-4 py-2 text-sm font-semibold text-red-400 transition hover:bg-red-900 hover:text-red-300 active:scale-95"
+				>
+					🗑 Clear History
+				</button>
+			{/if}
+		</div>
+
+		{#if errorMsg}
+			<div class="mt-6 rounded-xl border border-red-800 bg-red-950/50 px-5 py-3 text-sm text-red-400">
+				{errorMsg}
+			</div>
+		{/if}
 
 		<div class="mt-12 grid gap-6">
-			{#each data.games as game}
+			{#if games.length === 0}
+				<p class="text-slate-500">Keine Runden gespeichert.</p>
+			{/if}
+
+			{#each games as game}
 				<div class="rounded-2xl border border-slate-800 bg-slate-900 p-6">
 
 					<!-- Badge -->
@@ -106,7 +148,6 @@
 					<!-- ── Blackjack (neues Schema mit playerHands) ─────────── -->
 					{:else if game.playerHands}
 						<div class="flex flex-col gap-4">
-							<!-- Dealer -->
 							<div>
 								<p class="mb-2 text-xs tracking-wide text-slate-400 uppercase">
 									Dealer · {game.dealerScore}
@@ -121,8 +162,6 @@
 									{/each}
 								</div>
 							</div>
-
-							<!-- Player Hands -->
 							{#each game.playerHands as hand, hi}
 								<div class="rounded-xl border border-slate-700 bg-slate-800/50 p-4">
 									<div class="flex items-center justify-between mb-3">
@@ -132,7 +171,9 @@
 										</p>
 										<div class="flex items-center gap-3">
 											<span class="text-sm text-slate-400">{hand.bet} CHF</span>
-											<span class="font-bold {resultColor(hand.result ?? '')}">{resultLabel(hand.result ?? '')}</span>
+											<span class="font-bold {resultColor(hand.result ?? '')}">
+												{resultLabel(hand.result ?? '')}
+											</span>
 										</div>
 									</div>
 									<div class="flex flex-wrap gap-1">
