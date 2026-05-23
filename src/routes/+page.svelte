@@ -1,21 +1,27 @@
 <script lang="ts">
-	// ─── Modal state ──────────────────────────────────────────────────────────
+	import { onMount } from 'svelte';
+	import { getBankroll, resetBankroll } from '$lib/bankroll';
+
+	let bankroll = $state(1000);
+
+	onMount(() => {
+		bankroll = getBankroll();
+	});
+
+	function handleReset() {
+		if (!confirm('Bankroll auf 1000 CHF zurücksetzen?')) return;
+		resetBankroll();
+		bankroll = 1000;
+	}
 
 	type ModalGame = 'blackjack' | 'baccarat' | null;
 	let openModal = $state<ModalGame>(null);
 
-	function open(game: ModalGame) {
-		openModal = game;
-	}
-
-	function close() {
-		openModal = null;
-	}
-
+	function open(game: ModalGame) { openModal = game; }
+	function close() { openModal = null; }
 	function handleBackdrop(e: MouseEvent) {
 		if ((e.target as HTMLElement).dataset.backdrop) close();
 	}
-
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'Escape') close();
 	}
@@ -28,9 +34,24 @@
 		<h1 class="text-6xl font-bold tracking-tight">🎰 Casino</h1>
 		<p class="mt-4 text-lg text-slate-400">Wähle ein Spiel und starte deine Runde.</p>
 
-		<div class="mt-12 flex flex-col gap-6">
+		<!-- Bankroll-Anzeige -->
+		<div class="mt-8 inline-flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900 px-6 py-3">
+			<span class="text-sm text-slate-400">Guthaben</span>
+			<span class="text-2xl font-bold {bankroll <= 0 ? 'text-red-400' : bankroll < 100 ? 'text-amber-400' : 'text-emerald-400'}">
+				{bankroll.toFixed(2)} CHF
+			</span>
+			<button
+				onclick={handleReset}
+				class="ml-2 rounded-lg border border-slate-600 px-2 py-1 text-xs text-slate-400 transition hover:border-slate-400 hover:text-white"
+				title="Bankroll zurücksetzen"
+			>
+				↺ Reset
+			</button>
+		</div>
 
-			<!-- ── Blackjack ──────────────────────────────────────────────── -->
+		<div class="mt-10 flex flex-col gap-6">
+
+			<!-- Blackjack -->
 			<div class="flex flex-col gap-2">
 				<a
 					href="/blackjack"
@@ -46,7 +67,7 @@
 				</button>
 			</div>
 
-			<!-- ── Baccarat ───────────────────────────────────────────────── -->
+			<!-- Baccarat -->
 			<div class="flex flex-col gap-2">
 				<a
 					href="/baccarat"
@@ -62,7 +83,7 @@
 				</button>
 			</div>
 
-			<!-- ── History ────────────────────────────────────────────────── -->
+			<!-- History -->
 			<a
 				href="/history"
 				class="rounded-2xl border border-slate-700 bg-slate-900 px-8 py-5 text-xl font-semibold transition hover:bg-slate-800 active:scale-95"
@@ -76,32 +97,25 @@
 
 <!-- ══ MODAL OVERLAY ════════════════════════════════════════════════════════ -->
 {#if openModal !== null}
-	<!-- Backdrop -->
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 	<div
 		data-backdrop="true"
 		onclick={handleBackdrop}
-		class="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4 py-8 backdrop-blur-sm
-		       animate-[fadeIn_150ms_ease-out]"
-		style="animation: fadeIn 150ms ease-out;"
+		class="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4 py-8 backdrop-blur-sm"
 	>
-		<!-- Modal box (click inside does NOT close) -->
-		<div
-			class="relative z-50 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-8 shadow-2xl"
-			style="animation: slideUp 180ms ease-out;"
-		>
-			<!-- Close button -->
+		<div class="relative z-50 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-8 shadow-2xl">
+
 			<button
 				onclick={close}
 				class="absolute top-4 right-4 rounded-lg p-1.5 text-slate-500 hover:bg-slate-800 hover:text-white transition"
-				aria-label="Schließen"
+				aria-label="Schliessen"
 			>
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
 					<path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
 				</svg>
 			</button>
 
-			<!-- ── BLACKJACK REGELN ──────────────────────────────────────── -->
+			<!-- ── BLACKJACK REGELN ──────────────────────────────────────────── -->
 			{#if openModal === 'blackjack'}
 				<div class="pr-4">
 					<div class="flex items-center gap-3 mb-6">
@@ -109,7 +123,6 @@
 						<h2 class="text-2xl font-bold">Blackjack Regeln</h2>
 					</div>
 
-					<!-- Ziel -->
 					<section class="mb-6">
 						<h3 class="text-xs font-semibold tracking-widest text-emerald-400 uppercase mb-2">Ziel</h3>
 						<p class="text-slate-300 text-sm leading-relaxed">
@@ -117,7 +130,6 @@
 						</p>
 					</section>
 
-					<!-- Kartenwerte -->
 					<section class="mb-6">
 						<h3 class="text-xs font-semibold tracking-widest text-emerald-400 uppercase mb-3">Kartenwerte</h3>
 						<div class="grid grid-cols-3 gap-2">
@@ -136,7 +148,6 @@
 						</div>
 					</section>
 
-					<!-- Aktionen -->
 					<section class="mb-6">
 						<h3 class="text-xs font-semibold tracking-widest text-emerald-400 uppercase mb-3">Aktionen</h3>
 						<div class="flex flex-col gap-2">
@@ -159,13 +170,22 @@
 						</div>
 					</section>
 
-					<!-- Hausregeln -->
+					<section class="mb-6">
+						<h3 class="text-xs font-semibold tracking-widest text-emerald-400 uppercase mb-3">Auszahlungen</h3>
+						<div class="flex flex-col gap-1 text-sm">
+							<div class="flex justify-between"><span class="text-slate-300">Blackjack</span><span class="font-bold text-emerald-400">3:2</span></div>
+							<div class="flex justify-between"><span class="text-slate-300">Win</span><span class="font-bold text-emerald-400">1:1</span></div>
+							<div class="flex justify-between"><span class="text-slate-300">Push</span><span class="font-bold text-amber-400">Einsatz zurück</span></div>
+							<div class="flex justify-between"><span class="text-slate-300">Lose / Bust</span><span class="font-bold text-red-400">Verloren</span></div>
+						</div>
+					</section>
+
 					<section>
 						<h3 class="text-xs font-semibold tracking-widest text-emerald-400 uppercase mb-3">Hausregeln</h3>
 						<ul class="flex flex-col gap-1.5">
 							{#each [
 								'6-Deck Shoe',
-								'Dealer steht auf Soft 17',
+								'Dealer steht auf Soft 17 (z.B. A+6)',
 								'Double after Split erlaubt',
 								'Kein Surrender',
 								'Dealer prüft auf Blackjack (Peek)'
@@ -179,7 +199,7 @@
 					</section>
 				</div>
 
-			<!-- ── BACCARAT REGELN ───────────────────────────────────────── -->
+			<!-- ── BACCARAT REGELN ───────────────────────────────────────────── -->
 			{:else if openModal === 'baccarat'}
 				<div class="pr-4">
 					<div class="flex items-center gap-3 mb-6">
@@ -187,15 +207,13 @@
 						<h2 class="text-2xl font-bold">Baccarat Regeln</h2>
 					</div>
 
-					<!-- Ziel -->
 					<section class="mb-6">
 						<h3 class="text-xs font-semibold tracking-widest text-violet-400 uppercase mb-2">Ziel</h3>
 						<p class="text-slate-300 text-sm leading-relaxed">
-							Wette darauf, wessen Hand näher an <strong class="text-white">9</strong> liegt — Player, Banker oder Unentschieden (Tie).
+							Wette darauf, wessen Hand näher an <strong class="text-white">9</strong> liegt — Player, Banker oder Tie.
 						</p>
 					</section>
 
-					<!-- Kartenwerte -->
 					<section class="mb-6">
 						<h3 class="text-xs font-semibold tracking-widest text-violet-400 uppercase mb-3">Kartenwerte</h3>
 						<div class="grid grid-cols-3 gap-2">
@@ -217,41 +235,32 @@
 						</p>
 					</section>
 
-					<!-- Einsatzmöglichkeiten -->
 					<section class="mb-6">
-						<h3 class="text-xs font-semibold tracking-widest text-violet-400 uppercase mb-3">Einsatzmöglichkeiten</h3>
-						<div class="grid grid-cols-3 gap-2">
-							{#each [
-								{ label: 'Player', desc: 'Player gewinnt', color: 'border-emerald-700 bg-emerald-900/30 text-emerald-300' },
-								{ label: 'Banker', desc: 'Banker gewinnt', color: 'border-violet-700 bg-violet-900/30 text-violet-300' },
-								{ label: 'Tie', desc: 'Gleichstand', color: 'border-amber-700 bg-amber-900/30 text-amber-300' }
-							] as opt}
-								<div class="rounded-xl border {opt.color} p-3 text-center">
-									<p class="font-bold">{opt.label}</p>
-									<p class="text-xs mt-1 opacity-80">{opt.desc}</p>
-								</div>
-							{/each}
+						<h3 class="text-xs font-semibold tracking-widest text-violet-400 uppercase mb-3">Auszahlungen</h3>
+						<div class="flex flex-col gap-1 text-sm">
+							<div class="flex justify-between"><span class="text-slate-300">Player Win</span><span class="font-bold text-emerald-400">1:1</span></div>
+							<div class="flex justify-between"><span class="text-slate-300">Banker Win</span><span class="font-bold text-emerald-400">0.95:1 (5% Kommission)</span></div>
+							<div class="flex justify-between"><span class="text-slate-300">Tie Win</span><span class="font-bold text-emerald-400">8:1</span></div>
+							<div class="flex justify-between"><span class="text-slate-300">Tie (P/B-Wette)</span><span class="font-bold text-amber-400">Push</span></div>
 						</div>
 					</section>
 
-					<!-- Natural -->
 					<section class="mb-6">
 						<h3 class="text-xs font-semibold tracking-widest text-violet-400 uppercase mb-2">Natural Hand</h3>
 						<div class="rounded-xl border border-amber-700/50 bg-amber-900/20 px-4 py-3">
 							<p class="text-sm text-amber-200">
-								✨ Wenn Player oder Banker mit den ersten zwei Karten <strong>8 oder 9</strong> erreicht, ist es eine Natural Hand — es werden keine weiteren Karten gezogen.
+								✨ Wenn Player oder Banker mit den ersten zwei Karten <strong>8 oder 9</strong> erreicht — keine weiteren Karten.
 							</p>
 						</div>
 					</section>
 
-					<!-- Ziehregeln -->
 					<section>
 						<h3 class="text-xs font-semibold tracking-widest text-violet-400 uppercase mb-3">Ziehregeln (Punto Banco)</h3>
 						<p class="text-xs text-slate-500 mb-3">Laufen automatisch — du musst nur die Karten aufdecken.</p>
 						<div class="flex flex-col gap-2">
 							<div class="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3">
 								<p class="text-xs font-semibold text-slate-300 uppercase tracking-wide mb-1">Player</p>
-								<p class="text-sm text-slate-400">Zieht bei Wert 0 – 5 · Steht bei 6 – 7</p>
+								<p class="text-sm text-slate-400">Zieht bei Wert 0–5 · Steht bei 6–7</p>
 							</div>
 							<div class="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3">
 								<p class="text-xs font-semibold text-slate-300 uppercase tracking-wide mb-1">Banker</p>
@@ -262,7 +271,6 @@
 				</div>
 			{/if}
 
-			<!-- Close button bottom -->
 			<button
 				onclick={close}
 				class="mt-8 w-full rounded-xl border border-slate-700 bg-slate-800 py-3 text-sm font-semibold text-slate-300 transition hover:bg-slate-700 active:scale-95"
