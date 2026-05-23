@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { fly, fade } from 'svelte/transition';
 	import { getBankroll, setBankroll, bjPayout, type BjHandResult } from '$lib/bankroll';
 
 	// ─── Types ────────────────────────────────────────────────────────────────
@@ -15,8 +16,19 @@
 		doubled: boolean;
 		done: boolean;
 		result: BjHandResult | null;
-		payout: number;  // Was in die Bankroll zurückfliesst
+		payout: number;
+		// Animationsindex: ab welchem globalen Index wurden die Karten dieser Hand hinzugefügt
+		cardDealIndexes: number[];
 	}
+
+	// ─── Chips ────────────────────────────────────────────────────────────────
+	const CHIPS = [
+		{ value: 1,   label: '1',   bg: 'bg-slate-100',   border: 'border-slate-300', text: 'text-slate-900' },
+		{ value: 5,   label: '5',   bg: 'bg-red-600',     border: 'border-red-400',   text: 'text-white'     },
+		{ value: 25,  label: '25',  bg: 'bg-emerald-600', border: 'border-emerald-400',text: 'text-white'    },
+		{ value: 100, label: '100', bg: 'bg-slate-900',   border: 'border-slate-400', text: 'text-white'     },
+		{ value: 500, label: '500', bg: 'bg-violet-700',  border: 'border-yellow-400',text: 'text-yellow-300'},
+	] as const;
 
 	// ─── Deck ─────────────────────────────────────────────────────────────────
 	const RANKS: Rank[] = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
@@ -62,22 +74,31 @@
 
 	// ─── State ────────────────────────────────────────────────────────────────
 	let bankroll      = $state(1000);
-	let baseBet       = $state<number>(10);
+	let baseBet       = $state(0);
 	let betError      = $state('');
 	let phase         = $state<Phase>('setup');
 	let shoe          = $state<Card[]>([]);
 	let dealerCards   = $state<Card[]>([]);
+	let dealerDealIndexes = $state<number[]>([]); // Animationsindizes für Dealer-Karten
 	let holeRevealed  = $state(false);
 	let hands         = $state<PlayerHand[]>([]);
 	let activeIdx     = $state(0);
 	let statusMsg     = $state('');
 	let saved         = $state(false);
-	let bankrollBefore = 0; // nicht reaktiv — einmalig beim Deal gesetzt
+	let bankrollBefore = 0;
+	let globalCardIdx = 0; // Zählt jede ausgeteilte Karte für Delay-Berechnung
 
-	// Abgeleiteter Netto-Wert für das Result-Template — kein @const nötig
 	let displayNetResult = $derived(Math.round((bankroll - bankrollBefore) * 100) / 100);
 
 	onMount(() => { bankroll = getBankroll(); });
+
+	// ─── Chip helpers ─────────────────────────────────────────────────────────
+	function addChip(value: number) {
+		if (baseBet + value > bankroll) return;
+		betError = '';
+		baseBet += value;
+	}
+	function clearBet() { baseBet = 0; betError = ''; }
 
 	function draw(): Card {
 		if (shoe.length < 15) shoe = shuffle(buildShoe(6));
@@ -87,10 +108,9 @@
 	// ─── Deal ─────────────────────────────────────────────────────────────────
 	function deal() {
 		betError = '';
-		if (!baseBet || baseBet <= 0) { betError = 'Bitte gültigen Einsatz eingeben.'; return; }
+		if (baseBet <= 0)       { betError = 'Bitte zuerst Einsatz wählen.'; return; }
 		if (baseBet > bankroll) { betError = 'Nicht genügend Guthaben.'; return; }
 
-		// Einsatz sofort abziehen
 		bankrollBefore = bankroll;
 		bankroll -= baseBet;
 		setBankroll(bankroll);
@@ -99,13 +119,18 @@
 		holeRevealed  = false;
 		saved         = false;
 		statusMsg     = '';
+		globalCardIdx = 0;
 
 		const p1 = draw(), p2 = draw(), d1 = draw(), d2 = draw();
-		dealerCards = [d1, d2];
+		// Casino-Reihenfolge: P1, D1, P2, D2
+		dealerCards        = [d1, d2];
+		dealerDealIndexes  = [1, 3]; // D1 = idx 1, D2 (hole) = idx 3
 		hands = [{
 			cards: [p1, p2], bet: baseBet, doubled: false,
-			done: false, result: null, payout: 0
+			done: false, result: null, payout: 0,
+			cardDealIndexes: [0, 2], // P1 = idx 0, P2 = idx 2
 		}];
+		globalCardIdx = 4;
 		activeIdx = 0;
 		phase = 'player-turn';
 
@@ -128,7 +153,6 @@
 			}
 		}
 
-		// Player BJ
 		if (isBlackjack(hands[0].cards)) {
 			const p = bjPayout(hands[0].bet, 'blackjack');
 			hands = [{ ...hands[0], result: 'blackjack', done: true, payout: p }];
@@ -142,15 +166,14 @@
 	function canHit():    boolean { return phase === 'player-turn' && !ch().done; }
 	function canStand():  boolean { return phase === 'player-turn' && !ch().done; }
 	function canDouble(): boolean {
-		return phase === 'player-turn' && !ch().done
-			&& ch().cards.length === 2 && ch().bet <= bankroll;
+		return phase === 'player-turn' && !ch().done && ch().cards.length === 2 && ch().bet <= bankroll;
 	}
 	function canSplit(): boolean {
 		if (phase !== 'player-turn' || ch().done) return false;
 		const h = ch();
 		return h.cards.length === 2
 			&& bjValue(h.cards[0].rank) === bjValue(h.cards[1].rank)
-			&& baseBet <= bankroll; // braucht einen weiteren Einsatz
+			&& baseBet <= bankroll;
 	}
 
 	function updateHand(h: PlayerHand) {
@@ -159,7 +182,13 @@
 
 	function hit() {
 		if (!canHit()) return;
-		const h = { ...ch(), cards: [...ch().cards, draw()] };
+		const newCard = draw();
+		const newIdx  = globalCardIdx++;
+		const h = {
+			...ch(),
+			cards: [...ch().cards, newCard],
+			cardDealIndexes: [...ch().cardDealIndexes, newIdx],
+		};
 		if (handScore(h.cards) > 21) { h.done = true; h.result = 'bust'; statusMsg = 'Bust!'; }
 		updateHand(h);
 		if (h.done) advanceHand();
@@ -173,10 +202,18 @@
 
 	function doubleDown() {
 		if (!canDouble()) return;
-		// Zusätzlichen Einsatz abziehen
 		bankroll -= ch().bet;
 		setBankroll(bankroll);
-		const h = { ...ch(), bet: ch().bet * 2, doubled: true, cards: [...ch().cards, draw()], done: true };
+		const newCard = draw();
+		const newIdx  = globalCardIdx++;
+		const h = {
+			...ch(),
+			bet: ch().bet * 2,
+			doubled: true,
+			cards: [...ch().cards, newCard],
+			cardDealIndexes: [...ch().cardDealIndexes, newIdx],
+			done: true,
+		};
 		if (handScore(h.cards) > 21) { h.result = 'bust'; statusMsg = 'Bust after Double!'; }
 		updateHand(h);
 		advanceHand();
@@ -185,12 +222,19 @@
 	function split() {
 		if (!canSplit()) return;
 		const h = ch();
-		// Zweiten Einsatz abziehen
 		bankroll -= baseBet;
 		setBankroll(bankroll);
 		const isAceSplit = h.cards[0].rank === 'A';
-		const hand1: PlayerHand = { cards: [h.cards[0], draw()], bet: baseBet, doubled: false, done: isAceSplit, result: null, payout: 0 };
-		const hand2: PlayerHand = { cards: [h.cards[1], draw()], bet: baseBet, doubled: false, done: isAceSplit, result: null, payout: 0 };
+		const c1 = draw(), c2 = draw();
+		const i1 = globalCardIdx++, i2 = globalCardIdx++;
+		const hand1: PlayerHand = {
+			cards: [h.cards[0], c1], bet: baseBet, doubled: false, done: isAceSplit, result: null, payout: 0,
+			cardDealIndexes: [h.cardDealIndexes[0], i1],
+		};
+		const hand2: PlayerHand = {
+			cards: [h.cards[1], c2], bet: baseBet, doubled: false, done: isAceSplit, result: null, payout: 0,
+			cardDealIndexes: [h.cardDealIndexes[1], i2],
+		};
 		hands = [...hands.slice(0, activeIdx), hand1, hand2, ...hands.slice(activeIdx + 1)];
 		if (isAceSplit) { statusMsg = 'Aces split — one card each, standing automatically.'; advanceHand(); }
 		else { statusMsg = `Playing hand 1 of 2`; }
@@ -215,13 +259,16 @@
 		holeRevealed = true;
 		phase = 'dealer-turn';
 		let dCards = [...dealerCards];
+		let dIndexes = [...dealerDealIndexes];
 		while (true) {
 			const s = handScore(dCards);
 			if (s > 17) break;
 			if (s === 17) { if (isSoft17(dCards)) statusMsg = 'Dealer stands on soft 17.'; break; }
 			dCards = [...dCards, draw()];
+			dIndexes = [...dIndexes, globalCardIdx++];
 		}
 		dealerCards = dCards;
+		dealerDealIndexes = dIndexes;
 		evaluateResults();
 	}
 
@@ -232,7 +279,6 @@
 
 		hands = hands.map(h => {
 			if (h.result !== null) {
-				// Bereits gesetzt (Bust, BJ) — nur Payout berechnen wenn noch 0
 				const p = h.payout > 0 ? h.payout : bjPayout(h.bet, h.result);
 				return { ...h, payout: p };
 			}
@@ -249,11 +295,9 @@
 			return { ...h, result, payout };
 		});
 
-		// Bankroll mit allen Payouts auffüllen
 		const totalPayout = hands.reduce((s, h) => s + h.payout, 0);
 		bankroll += totalPayout;
 		setBankroll(bankroll);
-
 		statusMsg = '';
 		phase = 'result';
 		saveRound();
@@ -263,43 +307,33 @@
 	async function saveRound() {
 		if (saved) return;
 		saved = true;
-
 		const totalPayout = hands.reduce((s, h) => s + h.payout, 0);
-		const totalBet    = hands.reduce((s, h) => s + h.bet, 0);
 		const netResult   = Math.round((bankroll - bankrollBefore) * 100) / 100;
-
 		try {
 			await fetch('/api/save-game', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					game: 'blackjack',
-					bet:  baseBet,
+					game: 'blackjack', bet: baseBet,
 					playerHands: hands.map(h => ({
-						cards:   h.cards.map(cardLabel),
-						score:   handScore(h.cards),
-						bet:     h.bet,
-						doubled: h.doubled,
-						result:  h.result,
-						payout:  h.payout,
+						cards: h.cards.map(cardLabel), score: handScore(h.cards),
+						bet: h.bet, doubled: h.doubled, result: h.result, payout: h.payout,
 					})),
-					dealerCards:    dealerCards.map(cardLabel),
-					dealerScore:    handScore(dealerCards),
-					result:         hands[0].result ?? 'lose',
-					payout:         Math.round(totalPayout * 100) / 100,
+					dealerCards: dealerCards.map(cardLabel), dealerScore: handScore(dealerCards),
+					result: hands[0].result ?? 'lose',
+					payout: Math.round(totalPayout * 100) / 100,
 					bankrollBefore: Math.round(bankrollBefore * 100) / 100,
 					bankrollAfter:  Math.round(bankroll * 100) / 100,
 					netResult,
 				})
 			});
-		} catch (e) {
-			console.error('Failed to save:', e);
-		}
+		} catch (e) { console.error('Failed to save:', e); }
 	}
 
 	function newRound() {
-		phase = 'setup'; dealerCards = []; hands = []; activeIdx = 0;
-		holeRevealed = false; statusMsg = ''; saved = false; betError = '';
+		phase = 'setup'; dealerCards = []; dealerDealIndexes = []; hands = []; activeIdx = 0;
+		holeRevealed = false; statusMsg = ''; saved = false;
+		betError = ''; baseBet = 0; globalCardIdx = 0;
 	}
 
 	function resultLabel(r: BjHandResult | null): string {
@@ -320,13 +354,17 @@
 			default:          return 'text-red-400';
 		}
 	}
+
+	// Delay in ms basierend auf dem globalen Deal-Index
+	function dealDelay(idx: number): number { return idx * 140; }
 </script>
 
 <main class="min-h-screen bg-slate-950 px-6 py-16 text-white">
 	<div class="mx-auto max-w-2xl">
+
+		<!-- Header -->
 		<div class="flex items-center justify-between">
 			<a href="/" class="text-sm text-emerald-400 hover:underline">← Zurück zur Startseite</a>
-			<!-- Bankroll-Anzeige -->
 			<div class="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2">
 				<span class="text-xs text-slate-400">Guthaben</span>
 				<span class="text-lg font-bold {bankroll <= 0 ? 'text-red-400' : bankroll < 100 ? 'text-amber-400' : 'text-emerald-400'}">
@@ -338,87 +376,140 @@
 		<h1 class="mt-6 text-5xl font-bold">🃏 Blackjack</h1>
 		<p class="mt-3 text-slate-400">6-Deck Shoe · Dealer stands on soft 17 · Peek rule</p>
 
+		<!-- ══ SETUP ══════════════════════════════════════════════════════════ -->
 		{#if phase === 'setup'}
-			<div class="mt-10 rounded-2xl border border-slate-800 bg-slate-900 p-6">
-				<label class="block text-sm tracking-wide text-slate-400 uppercase">Einsatz (CHF)</label>
-				<input
-					type="number" min="1" max={bankroll}
-					bind:value={baseBet}
-					class="mt-2 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-xl font-semibold text-white focus:border-emerald-500 focus:outline-none"
-				/>
-				{#if betError}
-					<p class="mt-2 text-sm text-red-400">{betError}</p>
-				{/if}
-			</div>
-
 			{#if bankroll <= 0}
-				<div class="mt-6 rounded-2xl border border-red-800 bg-red-950/40 px-6 py-4 text-center">
+				<div class="mt-10 rounded-2xl border border-red-800 bg-red-950/40 px-6 py-4 text-center">
 					<p class="text-red-400 font-semibold">Kein Guthaben mehr.</p>
 					<a href="/" class="mt-2 inline-block text-sm text-slate-400 hover:text-white">← Zur Startseite (Bankroll zurücksetzen)</a>
 				</div>
 			{:else}
-				<button
-					onclick={deal}
-					disabled={!baseBet || baseBet <= 0}
-					class="mt-6 w-full rounded-2xl bg-emerald-600 px-8 py-5 text-xl font-semibold transition hover:bg-emerald-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
-				>
+				<!-- Einsatz-Anzeige -->
+				<div class="mt-10 flex items-center justify-between rounded-2xl border border-slate-700 bg-slate-900 px-6 py-5">
+					<div>
+						<p class="text-xs tracking-widest text-slate-500 uppercase">Einsatz</p>
+						<p class="mt-1 text-4xl font-bold {baseBet > 0 ? 'text-white' : 'text-slate-600'}">
+							{baseBet > 0 ? baseBet.toFixed(2) : '0.00'} <span class="text-xl font-normal text-slate-400">CHF</span>
+						</p>
+					</div>
+					{#if baseBet > 0}
+						<button onclick={clearBet}
+							class="rounded-xl border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-400 transition hover:border-red-600 hover:text-red-400 active:scale-95">
+							✕ Clear Bet
+						</button>
+					{/if}
+				</div>
+				{#if betError}<p class="mt-2 text-sm text-red-400">{betError}</p>{/if}
+
+				<!-- Chips -->
+				<div class="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-5">
+					<p class="mb-4 text-xs tracking-widest text-slate-500 uppercase">Chips wählen</p>
+					<div class="flex flex-wrap justify-center gap-4">
+						{#each CHIPS as chip}
+							{@const disabled = baseBet + chip.value > bankroll}
+							<button onclick={() => addChip(chip.value)} {disabled}
+								class="group relative flex h-16 w-16 flex-col items-center justify-center rounded-full border-4 font-bold shadow-lg
+									transition duration-150 select-none
+									{chip.bg} {chip.border} {chip.text}
+									{disabled ? 'cursor-not-allowed opacity-30' : 'hover:scale-110 hover:shadow-xl active:scale-95 cursor-pointer'}">
+								<span class="pointer-events-none absolute inset-2 rounded-full border-2 border-white/20"></span>
+								<span class="relative z-10 text-sm font-extrabold leading-none">{chip.label}</span>
+								<span class="relative z-10 text-[9px] font-semibold leading-none opacity-70">CHF</span>
+							</button>
+						{/each}
+					</div>
+				</div>
+
+				<button onclick={deal} disabled={baseBet <= 0}
+					class="mt-6 w-full rounded-2xl bg-emerald-600 px-8 py-5 text-xl font-semibold transition hover:bg-emerald-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">
 					🃏 Deal
 				</button>
 			{/if}
 
+		<!-- ══ GAME ═══════════════════════════════════════════════════════════ -->
 		{:else}
 			{#if statusMsg}
-				<div class="mt-8 rounded-xl border border-slate-700 bg-slate-900 px-5 py-3 text-center">
+				<div class="mt-8 rounded-xl border border-slate-700 bg-slate-900 px-5 py-3 text-center"
+					transition:fade={{ duration: 200 }}>
 					<p class="text-sm text-slate-300">{statusMsg}</p>
 				</div>
 			{:else}
 				<div class="mt-8"></div>
 			{/if}
 
-			<!-- Dealer -->
+			<!-- ── Dealer ──────────────────────────────────────────────────── -->
 			<div class="mt-4 rounded-2xl border border-slate-800 bg-slate-900 p-5">
 				<div class="flex items-center justify-between">
 					<p class="text-sm tracking-wide text-slate-400 uppercase font-semibold">Dealer</p>
 					{#if holeRevealed}
-						<span class="rounded-lg bg-slate-800 px-3 py-1 text-xl font-bold">{handScore(dealerCards)}</span>
+						<span class="rounded-lg bg-slate-800 px-3 py-1 text-xl font-bold"
+							transition:fade={{ duration: 300 }}>
+							{handScore(dealerCards)}
+						</span>
 					{:else}
 						<span class="rounded-lg bg-slate-800 px-3 py-1 text-xl font-bold text-slate-500">
 							{dealerCards.length > 0 ? handScore([dealerCards[0]]) : '?'} + ?
 						</span>
 					{/if}
 				</div>
+
 				<div class="mt-4 flex flex-wrap gap-3">
-					{#each dealerCards as card, i}
-						{#if i === 1 && !holeRevealed}
-							<div class="relative flex h-24 w-16 items-center justify-center rounded-xl border-2 border-slate-700 bg-slate-800 shadow-lg">
-								<span class="text-3xl text-slate-500">🂠</span>
-							</div>
-						{:else}
-							<div class="relative flex h-24 w-16 flex-col items-center justify-center rounded-xl border-2 shadow-lg
-								{cardIsRed(card) ? 'border-red-500 bg-white text-red-600' : 'border-slate-400 bg-white text-slate-900'}">
-								<span class="absolute top-1 left-1.5 text-xs font-bold leading-none">{card.rank}</span>
-								<span class="text-2xl font-bold">{card.suit}</span>
-								<span class="absolute bottom-1 right-1.5 text-xs font-bold leading-none rotate-180">{card.rank}</span>
-							</div>
-						{/if}
+					{#each dealerCards as card, i (i)}
+						{@const dealIdx = dealerDealIndexes[i] ?? i}
+						{@const isHole  = i === 1 && !holeRevealed}
+						<div
+							style="animation-delay: {dealDelay(dealIdx)}ms"
+							class="card-enter"
+						>
+							{#if isHole}
+								<!-- Hole Card — verdeckt -->
+								<div class="relative flex h-24 w-16 items-center justify-center rounded-xl border-2 border-slate-700 bg-slate-800 shadow-lg">
+									<div class="absolute inset-1 rounded-lg bg-slate-700/50 card-back-pattern"></div>
+									<span class="relative z-10 text-3xl text-slate-500">🂠</span>
+								</div>
+							{:else if i === 1 && holeRevealed}
+								<!-- Hole Card wird aufgedeckt — Flip-Animation -->
+								<div class="card-flip">
+									<div class="relative flex h-24 w-16 flex-col items-center justify-center rounded-xl border-2 shadow-lg
+										{cardIsRed(card) ? 'border-red-500 bg-white text-red-600' : 'border-slate-400 bg-white text-slate-900'}">
+										<span class="absolute top-1 left-1.5 text-xs font-bold leading-none">{card.rank}</span>
+										<span class="text-2xl font-bold">{card.suit}</span>
+										<span class="absolute bottom-1 right-1.5 text-xs font-bold leading-none rotate-180">{card.rank}</span>
+									</div>
+								</div>
+							{:else}
+								<div class="relative flex h-24 w-16 flex-col items-center justify-center rounded-xl border-2 shadow-lg
+									{cardIsRed(card) ? 'border-red-500 bg-white text-red-600' : 'border-slate-400 bg-white text-slate-900'}">
+									<span class="absolute top-1 left-1.5 text-xs font-bold leading-none">{card.rank}</span>
+									<span class="text-2xl font-bold">{card.suit}</span>
+									<span class="absolute bottom-1 right-1.5 text-xs font-bold leading-none rotate-180">{card.rank}</span>
+								</div>
+							{/if}
+						</div>
 					{/each}
 				</div>
 			</div>
 
-			<!-- Player Hands -->
+			<!-- ── Player Hands ────────────────────────────────────────────── -->
 			{#each hands as hand, hi}
-				<div class="mt-4 rounded-2xl border p-5 transition
-					{hi === activeIdx && phase === 'player-turn' ? 'border-emerald-500 bg-slate-900' : 'border-slate-800 bg-slate-900'}">
+				{@const isBust = hand.result === 'bust'}
+				{@const isBJ   = hand.result === 'blackjack'}
+				<div class="mt-4 rounded-2xl border p-5 transition-all duration-300
+					{hi === activeIdx && phase === 'player-turn' ? 'border-emerald-500 bg-slate-900' : 'border-slate-800 bg-slate-900'}
+					{isBust ? 'bust-shake' : ''}
+					{isBJ ? 'bj-glow' : ''}">
 					<div class="flex items-center justify-between">
 						<div class="flex items-center gap-3">
 							<p class="text-sm tracking-wide text-slate-400 uppercase font-semibold">
 								{hands.length > 1 ? `Hand ${hi + 1}` : 'Player'}
 							</p>
 							{#if hi === activeIdx && phase === 'player-turn'}
-								<span class="rounded-full bg-emerald-900 px-2 py-0.5 text-xs text-emerald-300">Your turn</span>
+								<span class="rounded-full bg-emerald-900 px-2 py-0.5 text-xs text-emerald-300"
+									transition:fade={{ duration: 200 }}>Your turn</span>
 							{/if}
 							{#if hand.doubled}
-								<span class="rounded-full bg-amber-900 px-2 py-0.5 text-xs text-amber-300">Doubled</span>
+								<span class="rounded-full bg-amber-900 px-2 py-0.5 text-xs text-amber-300"
+									transition:fade={{ duration: 200 }}>Doubled</span>
 							{/if}
 						</div>
 						<div class="flex items-center gap-3">
@@ -426,29 +517,39 @@
 							<span class="rounded-lg bg-slate-800 px-3 py-1 text-xl font-bold">{handScore(hand.cards)}</span>
 						</div>
 					</div>
+
 					<div class="mt-4 flex flex-wrap gap-3">
-						{#each hand.cards as card}
-							<div class="relative flex h-24 w-16 flex-col items-center justify-center rounded-xl border-2 shadow-lg
-								{cardIsRed(card) ? 'border-red-500 bg-white text-red-600' : 'border-slate-400 bg-white text-slate-900'}">
-								<span class="absolute top-1 left-1.5 text-xs font-bold leading-none">{card.rank}</span>
-								<span class="text-2xl font-bold">{card.suit}</span>
-								<span class="absolute bottom-1 right-1.5 text-xs font-bold leading-none rotate-180">{card.rank}</span>
+						{#each hand.cards as card, ci (ci)}
+							{@const dealIdx = hand.cardDealIndexes[ci] ?? ci}
+							<div style="animation-delay: {dealDelay(dealIdx)}ms" class="card-enter">
+								<div class="relative flex h-24 w-16 flex-col items-center justify-center rounded-xl border-2 shadow-lg
+									{cardIsRed(card) ? 'border-red-500 bg-white text-red-600' : 'border-slate-400 bg-white text-slate-900'}
+									{isBust ? 'opacity-70' : ''}">
+									<span class="absolute top-1 left-1.5 text-xs font-bold leading-none">{card.rank}</span>
+									<span class="text-2xl font-bold">{card.suit}</span>
+									<span class="absolute bottom-1 right-1.5 text-xs font-bold leading-none rotate-180">{card.rank}</span>
+								</div>
 							</div>
 						{/each}
 					</div>
+
 					{#if hand.result}
-						<p class="mt-3 text-lg font-bold {resultColor(hand.result)}">{resultLabel(hand.result)}</p>
+						<p class="mt-3 text-lg font-bold {resultColor(hand.result)}"
+							transition:fly={{ y: 8, duration: 250 }}>
+							{resultLabel(hand.result)}
+						</p>
 					{/if}
 				</div>
 			{/each}
 
 			<!-- Action Buttons -->
 			{#if phase === 'player-turn'}
-				<div class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-					<button onclick={hit}       disabled={!canHit()}    class="rounded-2xl bg-emerald-600 py-4 text-lg font-semibold transition hover:bg-emerald-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">Hit</button>
-					<button onclick={stand}     disabled={!canStand()}  class="rounded-2xl bg-slate-700 py-4 text-lg font-semibold transition hover:bg-slate-600 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">Stand</button>
+				<div class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4"
+					transition:fly={{ y: 16, duration: 250 }}>
+					<button onclick={hit}        disabled={!canHit()}    class="rounded-2xl bg-emerald-600 py-4 text-lg font-semibold transition hover:bg-emerald-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">Hit</button>
+					<button onclick={stand}      disabled={!canStand()}  class="rounded-2xl bg-slate-700 py-4 text-lg font-semibold transition hover:bg-slate-600 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">Stand</button>
 					<button onclick={doubleDown} disabled={!canDouble()} class="rounded-2xl bg-amber-600 py-4 text-lg font-semibold transition hover:bg-amber-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">Double</button>
-					<button onclick={split}     disabled={!canSplit()}  class="rounded-2xl bg-violet-700 py-4 text-lg font-semibold transition hover:bg-violet-600 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">Split</button>
+					<button onclick={split}      disabled={!canSplit()}  class="rounded-2xl bg-violet-700 py-4 text-lg font-semibold transition hover:bg-violet-600 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">Split</button>
 				</div>
 				{#if !canDouble() && phase === 'player-turn' && ch().cards.length === 2 && ch().bet > bankroll}
 					<p class="mt-2 text-xs text-amber-400">Double nicht verfügbar — nicht genügend Guthaben.</p>
@@ -460,7 +561,8 @@
 
 			<!-- Result -->
 			{#if phase === 'result'}
-				<div class="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-6">
+				<div class="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-6"
+					transition:fly={{ y: 20, duration: 350 }}>
 					<p class="text-sm tracking-wide text-slate-400 uppercase">Ergebnis</p>
 					<div class="mt-3 flex flex-col gap-2">
 						{#each hands as hand, hi}
@@ -476,7 +578,6 @@
 							</div>
 						{/each}
 					</div>
-					<!-- Netto-Ergebnis -->
 					<div class="mt-4 flex items-center justify-between border-t border-slate-700 pt-4">
 						<span class="text-sm text-slate-400">Netto</span>
 						<span class="text-xl font-bold {displayNetResult > 0 ? 'text-emerald-400' : displayNetResult < 0 ? 'text-red-400' : 'text-amber-400'}">
@@ -491,10 +592,75 @@
 						<p class="mt-3 text-sm text-slate-500">✓ Runde gespeichert</p>
 					{/if}
 				</div>
-				<button onclick={newRound} class="mt-6 w-full rounded-2xl border border-slate-700 bg-slate-900 px-8 py-4 text-xl font-semibold transition hover:bg-slate-800 active:scale-95">
+				<button onclick={newRound}
+					class="mt-6 w-full rounded-2xl border border-slate-700 bg-slate-900 px-8 py-4 text-xl font-semibold transition hover:bg-slate-800 active:scale-95"
+					transition:fly={{ y: 16, duration: 300, delay: 150 }}>
 					↩ Neue Runde
 				</button>
 			{/if}
 		{/if}
 	</div>
 </main>
+
+<style>
+	/* ── Karte erscheint: slide von oben + fade ─────────────────────────────── */
+	.card-enter {
+		animation: cardSlideIn 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+	}
+	@keyframes cardSlideIn {
+		from {
+			opacity: 0;
+			transform: translateY(-28px) scale(0.92);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0) scale(1);
+		}
+	}
+
+	/* ── Hole Card aufdecken: horizontaler Flip ─────────────────────────────── */
+	.card-flip {
+		animation: cardFlip 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
+		transform-style: preserve-3d;
+	}
+	@keyframes cardFlip {
+		0%   { transform: rotateY(90deg) scale(0.9); opacity: 0.3; }
+		60%  { transform: rotateY(-8deg) scale(1.04); opacity: 1; }
+		100% { transform: rotateY(0deg) scale(1); opacity: 1; }
+	}
+
+	/* ── Blackjack Glow ─────────────────────────────────────────────────────── */
+	.bj-glow {
+		animation: bjGlow 800ms ease-out both;
+	}
+	@keyframes bjGlow {
+		0%   { box-shadow: 0 0 0px 0px rgba(52, 211, 153, 0); }
+		30%  { box-shadow: 0 0 24px 8px rgba(52, 211, 153, 0.55); }
+		100% { box-shadow: 0 0 8px 2px rgba(52, 211, 153, 0.15); }
+	}
+
+	/* ── Bust: kurzes rotes Shake ───────────────────────────────────────────── */
+	.bust-shake {
+		animation: bustShake 440ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+		border-color: rgb(239 68 68 / 0.6) !important;
+	}
+	@keyframes bustShake {
+		0%,100% { transform: translateX(0); }
+		15%     { transform: translateX(-6px); }
+		30%     { transform: translateX(5px); }
+		45%     { transform: translateX(-4px); }
+		60%     { transform: translateX(3px); }
+		75%     { transform: translateX(-2px); }
+	}
+
+	/* ── Kartenrückseite Muster ─────────────────────────────────────────────── */
+	.card-back-pattern {
+		background-image: repeating-linear-gradient(
+			45deg,
+			transparent,
+			transparent 3px,
+			rgba(100, 116, 139, 0.15) 3px,
+			rgba(100, 116, 139, 0.15) 6px
+		);
+	}
+</style>
