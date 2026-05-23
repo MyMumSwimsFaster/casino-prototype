@@ -13,9 +13,18 @@
 	let wr     = $derived(winRate(stats));
 	let broke  = $derived(bankroll <= 0);
 
-	onMount(() => {
+	function loadFromStorage() {
 		bankroll = getBankroll();
 		stats    = getStats();
+	}
+
+	onMount(() => {
+		loadFromStorage();
+		// Wenn der Tab wieder sichtbar wird (Rückkehr von Spielseite):
+		// Stats und Bankroll aus localStorage neu laden → live aktualisiert
+		const onVisible = () => { if (document.visibilityState === 'visible') loadFromStorage(); };
+		document.addEventListener('visibilitychange', onVisible);
+		return () => document.removeEventListener('visibilitychange', onVisible);
 	});
 
 	function handleReset() {

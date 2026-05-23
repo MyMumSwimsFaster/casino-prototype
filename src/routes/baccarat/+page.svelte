@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { fly, fade } from 'svelte/transition';
 	import { getBankroll, setBankroll, baccaratPayout, type BaccaratSelectedBet, type BaccaratResult } from '$lib/bankroll';
-	import { recordRound, type RoundOutcome } from '$lib/stats';
+	import { recordRoundDirect, type RoundOutcome } from '$lib/stats';
 	import GameOver from '$lib/components/GameOver.svelte';
 
 	// ─── Types ────────────────────────────────────────────────────────────────
@@ -181,6 +181,14 @@
 		payout = baccaratPayout(bet, selectedBet, round.result);
 		bankroll += payout;
 		setBankroll(bankroll);
+
+		// ── Session Stats erfassen ───────────────────────────────────────────
+		const bacNetResult = Math.round((payout - bet) * 100) / 100;
+		const bacOutcome: RoundOutcome =
+			bacNetResult > 0 ? 'win' :
+			bacNetResult < 0 ? 'loss' :
+			'push';
+		recordRoundDirect(bacOutcome, bacNetResult, 1);
 
 		try {
 			await fetch('/api/save-game', {

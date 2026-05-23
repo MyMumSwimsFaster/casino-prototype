@@ -96,6 +96,31 @@ export function recordRound(
 	setStats(stats);
 }
 
+// ─── Direktes Update (atomar: lesen + schreiben in einem Schritt) ────────────
+// Vermeidet Race Conditions wenn mehrere Hands schnell hintereinander gespeichert werden
+
+export function recordRoundDirect(
+	outcome: RoundOutcome,
+	netResult: number,
+	numHands = 1
+): void {
+	if (!browser) return;
+	const stats = getStats();
+
+	stats.handsPlayed += numHands;
+
+	if (outcome === 'win') {
+		stats.wins += numHands;
+		if (netResult > stats.biggestWin) stats.biggestWin = Math.round(netResult * 100) / 100;
+	} else if (outcome === 'loss') {
+		stats.losses += numHands;
+	} else {
+		stats.pushes += numHands;
+	}
+
+	setStats(stats);
+}
+
 // ─── Berechnete Werte ─────────────────────────────────────────────────────────
 
 export function winRate(stats: SessionStats): number {
