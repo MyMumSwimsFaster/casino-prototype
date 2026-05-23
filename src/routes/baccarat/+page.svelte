@@ -3,6 +3,7 @@
 	import { fly, fade } from 'svelte/transition';
 	import { getBankroll, setBankroll, baccaratPayout, type BaccaratSelectedBet, type BaccaratResult } from '$lib/bankroll';
 	import { recordRoundDirect, type RoundOutcome } from '$lib/stats';
+	import { sfx, getMuted, toggleMuted as _toggleMuted } from '$lib/sounds';
 	import GameOver from '$lib/components/GameOver.svelte';
 
 	// ─── Types ────────────────────────────────────────────────────────────────
@@ -104,13 +105,20 @@
 
 	let displayNetResult = $derived(Math.round((bankroll - bankrollBefore) * 100) / 100);
 
-	onMount(() => { bankroll = getBankroll(); });
+	let muted = $state(false);
+	function toggleMute() { muted = _toggleMuted(); }
+
+	onMount(() => {
+		bankroll = getBankroll();
+		muted = getMuted();
+	});
 
 	// ─── Chip helpers ─────────────────────────────────────────────────────────
 	function addChip(value: number) {
 		if (bet + value > bankroll) return;
 		betError = '';
 		bet += value;
+		sfx.chipClick();
 	}
 	function clearBet() { bet = 0; betError = ''; }
 
@@ -119,6 +127,7 @@
 
 	function revealCard(key: string) {
 		if (!isRevealable(key)) return;
+		sfx.cardDeal();
 		// Zuerst zur animated-Set hinzufügen (trigger für Animation)
 		animatedCards = new Set([...animatedCards, key]);
 		revealed = new Set([...revealed, key]);
@@ -182,13 +191,19 @@
 		bankroll += payout;
 		setBankroll(bankroll);
 
-		// ── Session Stats erfassen ───────────────────────────────────────────
+		// ── Session Stats ────────────────────────────────────────────────────
 		const bacNetResult = Math.round((payout - bet) * 100) / 100;
 		const bacOutcome: RoundOutcome =
 			bacNetResult > 0 ? 'win' :
 			bacNetResult < 0 ? 'loss' :
 			'push';
 		recordRoundDirect(bacOutcome, bacNetResult, 1);
+		// ── Sounds ───────────────────────────────────────────────────────────
+		setTimeout(() => {
+			if (round?.naturalHand) sfx.natural();
+			else if (bacNetResult > 0) sfx.win();
+			else if (bacNetResult < 0) sfx.lose();
+		}, 350);
 
 		try {
 			await fetch('/api/save-game', {
@@ -257,11 +272,20 @@
 		<!-- Header -->
 		<div class="flex items-center justify-between">
 			<a href="/" class="text-sm text-emerald-400 hover:underline">← Zurück zur Startseite</a>
-			<div class="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2">
-				<span class="text-xs text-slate-400">Guthaben</span>
-				<span class="text-lg font-bold {bankroll <= 0 ? 'text-red-400' : bankroll < 100 ? 'text-amber-400' : 'text-emerald-400'}">
-					{bankroll.toFixed(2)} CHF
-				</span>
+			<div class="flex items-center gap-2">
+				<button
+					onclick={toggleMute}
+					class="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-base transition hover:bg-slate-800"
+					title={muted ? 'Sound an' : 'Sound aus'}
+				>
+					{muted ? '🔇' : '🔊'}
+				</button>
+				<div class="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2">
+					<span class="text-xs text-slate-400">Guthaben</span>
+					<span class="text-lg font-bold {bankroll <= 0 ? 'text-red-400' : bankroll < 100 ? 'text-amber-400' : 'text-emerald-400'}">
+						{bankroll.toFixed(2)} CHF
+					</span>
+				</div>
 			</div>
 		</div>
 

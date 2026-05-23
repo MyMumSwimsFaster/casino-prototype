@@ -3,6 +3,7 @@
 	import { fly, fade } from 'svelte/transition';
 	import { getBankroll, setBankroll, bjPayout, type BjHandResult } from '$lib/bankroll';
 	import { recordRoundDirect, type RoundOutcome } from '$lib/stats';
+	import { sfx, getMuted, toggleMuted as _toggleMuted } from '$lib/sounds';
 	import GameOver from '$lib/components/GameOver.svelte';
 
 	// ─── Types ────────────────────────────────────────────────────────────────
@@ -94,13 +95,22 @@
 
 	let displayNetResult = $derived(Math.round((bankroll - bankrollBefore) * 100) / 100);
 
-	onMount(() => { bankroll = getBankroll(); });
+	let muted = $state(false);
+	function toggleMute() { muted = _toggleMuted(); }
+
+	onMount(() => {
+		bankroll = getBankroll();
+		muted = getMuted();
+	});
+
+
 
 	// ─── Chip helpers ─────────────────────────────────────────────────────────
 	function addChip(value: number) {
 		if (baseBet + value > bankroll) return;
 		betError = '';
 		baseBet += value;
+		sfx.chipClick();
 	}
 	function clearBet() { baseBet = 0; betError = ''; }
 
@@ -137,6 +147,8 @@
 		globalCardIdx = 4;
 		activeIdx = 0;
 		phase = 'player-turn';
+		// Gestaffelte Kartengeräusche für den initialen Deal
+		[0, 140, 280, 420].forEach(delay => setTimeout(() => sfx.cardDeal(), delay));
 
 		// Dealer Peek
 		const uv = bjValue(d1.rank);
@@ -151,6 +163,7 @@
 				setBankroll(bankroll);
 				phase = 'result';
 				saveRound();
+				setTimeout(() => { const r = hands[0].result; if (r === 'push') sfx.win(); else sfx.lose(); }, 400);
 				return;
 			} else {
 				statusMsg = 'Dealer checked — no Blackjack.';
@@ -161,6 +174,7 @@
 			const p = bjPayout(hands[0].bet, 'blackjack');
 			hands = [{ ...hands[0], result: 'blackjack', done: true, payout: p }];
 			statusMsg = 'Blackjack! 🎉';
+			sfx.blackjack();
 			startDealerTurn();
 		}
 	}
@@ -186,6 +200,7 @@
 
 	function hit() {
 		if (!canHit()) return;
+		sfx.cardDeal();
 		const newCard = draw();
 		const newIdx  = globalCardIdx++;
 		const h = {
@@ -305,6 +320,13 @@
 		statusMsg = '';
 		phase = 'result';
 		saveRound();
+		// Sound basierend auf Gesamtergebnis der Runde
+		const hasBJ  = hands.some(h => h.result === 'blackjack');
+		const hasWin = hands.some(h => h.result === 'win' || h.result === 'dealer-bust');
+		const allLost = hands.every(h => h.result === 'lose' || h.result === 'bust');
+		if (hasBJ)       setTimeout(() => sfx.blackjack(), 200);
+		else if (hasWin) setTimeout(() => sfx.win(), 200);
+		else if (allLost) setTimeout(() => sfx.lose(), 200);
 	}
 
 	// ─── Save ─────────────────────────────────────────────────────────────────
@@ -313,16 +335,6 @@
 		saved = true;
 		const totalPayout = hands.reduce((s, h) => s + h.payout, 0);
 		const netResult   = Math.round((bankroll - bankrollBefore) * 100) / 100;
-
-		// ── Session Stats: jede Hand einzeln erfassen (korrekt bei Split) ────
-		for (const h of hands) {
-			const isWin  = h.result === 'win' || h.result === 'blackjack' || h.result === 'dealer-bust';
-			const isLoss = h.result === 'lose' || h.result === 'bust';
-			const outcome: RoundOutcome = isWin ? 'win' : isLoss ? 'loss' : 'push';
-			const handNet = Math.round((h.payout - h.bet) * 100) / 100;
-			recordRoundDirect(outcome, handNet, 1);
-		}
-
 		try {
 			await fetch('/api/save-game', {
 				method: 'POST',
@@ -386,11 +398,22 @@
 		<!-- Header -->
 		<div class="flex items-center justify-between">
 			<a href="/" class="text-sm text-emerald-400 hover:underline">← Zurück zur Startseite</a>
-			<div class="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2">
-				<span class="text-xs text-slate-400">Guthaben</span>
-				<span class="text-lg font-bold {bankroll <= 0 ? 'text-red-400' : bankroll < 100 ? 'text-amber-400' : 'text-emerald-400'}">
-					{bankroll.toFixed(2)} CHF
-				</span>
+			<div class="flex items-center gap-2">
+				<!-- Mute Toggle -->
+				<button
+					onclick={toggleMute}
+					class="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-base transition hover:bg-slate-800"
+					title={muted ? 'Sound an' : 'Sound aus'}
+					aria-label={muted ? 'Sound einschalten' : 'Sound ausschalten'}
+				>
+					{muted ? '🔇' : '🔊'}
+				</button>
+				<div class="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2">
+					<span class="text-xs text-slate-400">Guthaben</span>
+					<span class="text-lg font-bold {bankroll <= 0 ? 'text-red-400' : bankroll < 100 ? 'text-amber-400' : 'text-emerald-400'}">
+						{bankroll.toFixed(2)} CHF
+					</span>
+				</div>
 			</div>
 		</div>
 

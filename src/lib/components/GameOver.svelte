@@ -47,6 +47,7 @@
 		onclick={stopProp}
 		role="dialog"
 		aria-modal="true"
+		tabindex="-1"
 	>
 		<!-- Pulsierender roter Ring — pointer-events:none damit er Buttons nicht blockiert -->
 		<div class="pulse-ring absolute -inset-px rounded-3xl" style="pointer-events: none;"></div>
