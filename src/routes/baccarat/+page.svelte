@@ -3,6 +3,7 @@
 	import { fly, fade } from 'svelte/transition';
 	import { getBankroll, setBankroll, baccaratPayout, type BaccaratSelectedBet, type BaccaratResult } from '$lib/bankroll';
 	import { recordRound, type RoundOutcome } from '$lib/stats';
+	import GameOver from '$lib/components/GameOver.svelte';
 
 	// ─── Types ────────────────────────────────────────────────────────────────
 	type Suit = '♠' | '♥' | '♦' | '♣';
@@ -90,6 +91,8 @@
 	let betError     = $state('');
 	let selectedBet  = $state<BaccaratSelectedBet>('Player');
 	let phase        = $state<Phase>('setup');
+	// gameOver reaktiv — feuert sofort wenn bankroll <= 0 nach einer Runde
+	let gameOver     = $derived(bankroll <= 0 && phase === 'result');
 	let saved        = $state(false);
 	let round        = $state<DealtRound | null>(null);
 	let revealed     = $state<Set<string>>(new Set());
@@ -179,15 +182,6 @@
 		bankroll += payout;
 		setBankroll(bankroll);
 
-		// ── Stats erfassen ──────────────────────────────────────────────
-		// Push: Tie-Ergebnis bei P/B-Wette (payout === bet) oder kein Gewinn/Verlust
-		const netBac = Math.round((payout - bet) * 100) / 100;
-		const outcomeBac: RoundOutcome =
-			netBac > 0 ? 'win' :
-			netBac < 0 ? 'loss' :
-			'push';
-		recordRound(outcomeBac, netBac, 1);
-
 		try {
 			await fetch('/api/save-game', {
 				method: 'POST',
@@ -209,6 +203,13 @@
 			});
 			saved = true;
 		} catch (e) { console.error('Failed to save:', e); }
+	}
+
+	function handleGameOverReset() {
+		// gameOver wird automatisch false wenn bankroll > 0 (via $derived)
+		bankroll = 1000;
+		bet      = 0;
+		phase    = 'setup';
 	}
 
 	function newRound() {
@@ -261,12 +262,6 @@
 
 		<!-- ══ SETUP ══════════════════════════════════════════════════════════ -->
 		{#if phase === 'setup'}
-			{#if bankroll <= 0}
-				<div class="mt-10 rounded-2xl border border-red-800 bg-red-950/40 px-6 py-4 text-center">
-					<p class="text-red-400 font-semibold">Kein Guthaben mehr.</p>
-					<a href="/" class="mt-2 inline-block text-sm text-slate-400 hover:text-white">← Zur Startseite</a>
-				</div>
-			{:else}
 				<!-- Einsatz-Anzeige -->
 				<div class="mt-10 flex items-center justify-between rounded-2xl border border-slate-700 bg-slate-900 px-6 py-5">
 					<div>
@@ -324,7 +319,6 @@
 					class="mt-6 w-full rounded-2xl bg-emerald-600 px-8 py-4 text-xl font-semibold transition hover:bg-emerald-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">
 					🃏 Karten ziehen
 				</button>
-			{/if}
 
 		<!-- ══ DEALING ════════════════════════════════════════════════════════ -->
 		{:else if phase === 'dealing'}
@@ -581,6 +575,10 @@
 
 	</div>
 </main>
+
+{#if gameOver}
+	<GameOver onReset={handleGameOverReset} />
+{/if}
 
 <style>
 	/* ── Verdeckte Karte erscheint beim Deal: sanftes Slide ─────────────────── */

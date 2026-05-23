@@ -3,29 +3,28 @@
 	import { getBankroll, resetBankroll } from '$lib/bankroll';
 	import { getStats, resetStats, winRate, sessionProfit, type SessionStats } from '$lib/stats';
 
-	let bankroll   = $state(1000);
-	let stats      = $state<SessionStats>({
+	let bankroll = $state(1000);
+	let stats    = $state<SessionStats>({
 		handsPlayed: 0, wins: 0, losses: 0, pushes: 0,
 		biggestWin: 0, sessionStartBankroll: 1000,
 	});
+
+	let profit = $derived(sessionProfit(stats, bankroll));
+	let wr     = $derived(winRate(stats));
+	let broke  = $derived(bankroll <= 0);
 
 	onMount(() => {
 		bankroll = getBankroll();
 		stats    = getStats();
 	});
 
-	// Berechnete Werte
-	let profit    = $derived(sessionProfit(stats, bankroll));
-	let wr        = $derived(winRate(stats));
-
 	function handleReset() {
-		const also = confirm('Bankroll auf 1000 CHF zurücksetzen?\n\nOK = auch Session-Stats zurücksetzen\nAbbrechen = nur Bankroll zurücksetzen');
+		const also = confirm(
+			'Bankroll auf 1000 CHF zurücksetzen?\n\nOK = auch Session-Stats zurücksetzen\nAbbrechen = nur Bankroll zurücksetzen'
+		);
 		resetBankroll();
 		bankroll = 1000;
-		if (also) {
-			resetStats(1000);
-			stats = getStats();
-		}
+		if (also) { resetStats(1000); stats = getStats(); }
 	}
 
 	type ModalGame = 'blackjack' | 'baccarat' | null;
@@ -64,7 +63,7 @@
 				</button>
 			</div>
 
-			<!-- Bankroll + Profit: grosse Zeile oben -->
+			<!-- Bankroll + P&L: grosse obere Zeile -->
 			<div class="mb-4 grid grid-cols-2 gap-3">
 				<div class="rounded-xl bg-slate-800/60 px-4 py-3">
 					<p class="text-xs text-slate-500 uppercase tracking-wide">Bankroll</p>
@@ -82,39 +81,28 @@
 
 			<!-- 6 kleinere Stat-Karten -->
 			<div class="grid grid-cols-3 gap-2">
-				<!-- Hands Played -->
 				<div class="rounded-xl bg-slate-800/40 px-3 py-2.5 text-center">
 					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Hands</p>
 					<p class="mt-0.5 text-xl font-bold text-white">{stats.handsPlayed}</p>
 				</div>
-
-				<!-- Wins -->
 				<div class="rounded-xl bg-slate-800/40 px-3 py-2.5 text-center">
 					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Wins</p>
 					<p class="mt-0.5 text-xl font-bold {stats.wins > 0 ? 'text-emerald-400' : 'text-slate-400'}">{stats.wins}</p>
 				</div>
-
-				<!-- Losses -->
 				<div class="rounded-xl bg-slate-800/40 px-3 py-2.5 text-center">
 					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Losses</p>
 					<p class="mt-0.5 text-xl font-bold {stats.losses > 0 ? 'text-red-400' : 'text-slate-400'}">{stats.losses}</p>
 				</div>
-
-				<!-- Pushes -->
 				<div class="rounded-xl bg-slate-800/40 px-3 py-2.5 text-center">
 					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Pushes</p>
 					<p class="mt-0.5 text-xl font-bold text-amber-400">{stats.pushes}</p>
 				</div>
-
-				<!-- Win Rate -->
 				<div class="rounded-xl bg-slate-800/40 px-3 py-2.5 text-center">
 					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Win Rate</p>
 					<p class="mt-0.5 text-xl font-bold {wr >= 50 ? 'text-emerald-400' : wr > 0 ? 'text-amber-400' : 'text-slate-400'}">
 						{stats.handsPlayed > 0 ? wr.toFixed(1) + '%' : '—'}
 					</p>
 				</div>
-
-				<!-- Biggest Win -->
 				<div class="rounded-xl bg-slate-800/40 px-3 py-2.5 text-center">
 					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Best Win</p>
 					<p class="mt-0.5 text-xl font-bold {stats.biggestWin > 0 ? 'text-emerald-400' : 'text-slate-400'}">
@@ -124,38 +112,56 @@
 			</div>
 		</div>
 
-		<!-- ── Spielbuttons ──────────────────────────────────────────────── -->
-		<div class="mt-8 flex flex-col gap-6">
+		<!-- ── Hinweis bei 0 Guthaben ────────────────────────────────────── -->
+		{#if broke}
+			<div class="mt-6 rounded-2xl border border-red-900/50 bg-red-950/30 px-5 py-4 text-sm text-red-400 text-center">
+				💸 Kein Guthaben mehr. Setze dein Guthaben zurück oder schau dir deine History an.
+			</div>
+		{/if}
 
-			<!-- Blackjack -->
+		<!-- ── Spielbuttons ──────────────────────────────────────────────── -->
+		<div class="mt-6 flex flex-col gap-6">
+
+			<!-- Blackjack: bei 0 CHF führt der Link zur Spielseite → dort erscheint das Modal -->
 			<div class="flex flex-col gap-2">
-				<a href="/blackjack"
-					class="rounded-2xl bg-emerald-600 px-8 py-5 text-xl font-semibold text-center transition hover:bg-emerald-500 active:scale-95">
+				<a
+					href="/blackjack"
+					class="rounded-2xl px-8 py-5 text-xl font-semibold text-center transition active:scale-95
+					{broke
+						? 'bg-slate-800 text-slate-600 border border-slate-700 cursor-default'
+						: 'bg-emerald-600 hover:bg-emerald-500'}"
+				>
 					🃏 Blackjack starten
 				</a>
-				<button onclick={() => open('blackjack')}
-					class="text-sm text-slate-500 hover:text-slate-300 transition">
+				<button onclick={() => open('blackjack')} class="text-sm text-slate-500 hover:text-slate-300 transition">
 					Blackjack Regeln
 				</button>
 			</div>
 
-			<!-- Baccarat -->
+			<!-- Baccarat: gleiche Logik -->
 			<div class="flex flex-col gap-2">
-				<a href="/baccarat"
-					class="rounded-2xl bg-emerald-700 px-8 py-5 text-xl font-semibold text-center transition hover:bg-emerald-600 active:scale-95">
+				<a
+					href="/baccarat"
+					class="rounded-2xl px-8 py-5 text-xl font-semibold text-center transition active:scale-95
+					{broke
+						? 'bg-slate-800 text-slate-600 border border-slate-700 cursor-default'
+						: 'bg-emerald-700 hover:bg-emerald-600'}"
+				>
 					🎴 Baccarat starten
 				</a>
-				<button onclick={() => open('baccarat')}
-					class="text-sm text-slate-500 hover:text-slate-300 transition">
+				<button onclick={() => open('baccarat')} class="text-sm text-slate-500 hover:text-slate-300 transition">
 					Baccarat Regeln
 				</button>
 			</div>
 
-			<!-- History -->
-			<a href="/history"
-				class="rounded-2xl border border-slate-700 bg-slate-900 px-8 py-5 text-xl font-semibold text-center transition hover:bg-slate-800 active:scale-95">
+			<!-- History: immer anklickbar -->
+			<a
+				href="/history"
+				class="rounded-2xl border border-slate-700 bg-slate-900 px-8 py-5 text-xl font-semibold text-center transition hover:bg-slate-800 active:scale-95"
+			>
 				📜 History
 			</a>
+
 		</div>
 	</div>
 </main>
@@ -169,7 +175,6 @@
 		class="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4 py-8 backdrop-blur-sm"
 	>
 		<div class="relative z-50 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-8 shadow-2xl">
-
 			<button onclick={close}
 				class="absolute top-4 right-4 rounded-lg p-1.5 text-slate-500 hover:bg-slate-800 hover:text-white transition"
 				aria-label="Schliessen">
@@ -180,10 +185,7 @@
 
 			{#if openModal === 'blackjack'}
 				<div class="pr-4">
-					<div class="flex items-center gap-3 mb-6">
-						<span class="text-3xl">🃏</span>
-						<h2 class="text-2xl font-bold">Blackjack Regeln</h2>
-					</div>
+					<div class="flex items-center gap-3 mb-6"><span class="text-3xl">🃏</span><h2 class="text-2xl font-bold">Blackjack Regeln</h2></div>
 					<section class="mb-6">
 						<h3 class="text-xs font-semibold tracking-widest text-emerald-400 uppercase mb-2">Ziel</h3>
 						<p class="text-slate-300 text-sm leading-relaxed">Komme mit deinen Karten möglichst nah an <strong class="text-white">21</strong>, ohne zu überschreiten — und schlage dabei den Dealer.</p>
@@ -226,10 +228,7 @@
 
 			{:else if openModal === 'baccarat'}
 				<div class="pr-4">
-					<div class="flex items-center gap-3 mb-6">
-						<span class="text-3xl">🎴</span>
-						<h2 class="text-2xl font-bold">Baccarat Regeln</h2>
-					</div>
+					<div class="flex items-center gap-3 mb-6"><span class="text-3xl">🎴</span><h2 class="text-2xl font-bold">Baccarat Regeln</h2></div>
 					<section class="mb-6">
 						<h3 class="text-xs font-semibold tracking-widest text-violet-400 uppercase mb-2">Ziel</h3>
 						<p class="text-slate-300 text-sm leading-relaxed">Wette darauf, wessen Hand näher an <strong class="text-white">9</strong> liegt — Player, Banker oder Tie.</p>

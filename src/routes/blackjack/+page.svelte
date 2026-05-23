@@ -3,6 +3,7 @@
 	import { fly, fade } from 'svelte/transition';
 	import { getBankroll, setBankroll, bjPayout, type BjHandResult } from '$lib/bankroll';
 	import { recordRound, type RoundOutcome } from '$lib/stats';
+	import GameOver from '$lib/components/GameOver.svelte';
 
 	// ─── Types ────────────────────────────────────────────────────────────────
 	type Suit = '♠' | '♥' | '♦' | '♣';
@@ -78,6 +79,8 @@
 	let baseBet       = $state(0);
 	let betError      = $state('');
 	let phase         = $state<Phase>('setup');
+	// gameOver reaktiv — feuert sofort wenn bankroll <= 0 nach einer Runde
+	let gameOver      = $derived(bankroll <= 0 && phase === 'result');
 	let shoe          = $state<Card[]>([]);
 	let dealerCards   = $state<Card[]>([]);
 	let dealerDealIndexes = $state<number[]>([]); // Animationsindizes für Dealer-Karten
@@ -310,18 +313,6 @@
 		saved = true;
 		const totalPayout = hands.reduce((s, h) => s + h.payout, 0);
 		const netResult   = Math.round((bankroll - bankrollBefore) * 100) / 100;
-
-		// ── Stats erfassen ──────────────────────────────────────────────
-		// Jede Hand zählt separat (inkl. Split-Hände)
-		for (const h of hands) {
-			const isWin  = h.result === 'win' || h.result === 'blackjack' || h.result === 'dealer-bust';
-			const isLoss = h.result === 'lose' || h.result === 'bust';
-			const outcome: RoundOutcome = isWin ? 'win' : isLoss ? 'loss' : 'push';
-			// Netto pro Hand: Payout - Einsatz (Einsatz wurde beim Deal abgezogen)
-			const handNet = Math.round((h.payout - h.bet) * 100) / 100;
-			recordRound(outcome, handNet, 1);
-		}
-
 		try {
 			await fetch('/api/save-game', {
 				method: 'POST',
@@ -341,6 +332,13 @@
 				})
 			});
 		} catch (e) { console.error('Failed to save:', e); }
+	}
+
+	function handleGameOverReset() {
+		// gameOver wird automatisch false wenn bankroll > 0 (via $derived)
+		bankroll = 1000;
+		baseBet  = 0;
+		phase    = 'setup';
 	}
 
 	function newRound() {
@@ -391,12 +389,7 @@
 
 		<!-- ══ SETUP ══════════════════════════════════════════════════════════ -->
 		{#if phase === 'setup'}
-			{#if bankroll <= 0}
-				<div class="mt-10 rounded-2xl border border-red-800 bg-red-950/40 px-6 py-4 text-center">
-					<p class="text-red-400 font-semibold">Kein Guthaben mehr.</p>
-					<a href="/" class="mt-2 inline-block text-sm text-slate-400 hover:text-white">← Zur Startseite (Bankroll zurücksetzen)</a>
-				</div>
-			{:else}
+
 				<!-- Einsatz-Anzeige -->
 				<div class="mt-10 flex items-center justify-between rounded-2xl border border-slate-700 bg-slate-900 px-6 py-5">
 					<div>
@@ -437,7 +430,6 @@
 					class="mt-6 w-full rounded-2xl bg-emerald-600 px-8 py-5 text-xl font-semibold transition hover:bg-emerald-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">
 					🃏 Deal
 				</button>
-			{/if}
 
 		<!-- ══ GAME ═══════════════════════════════════════════════════════════ -->
 		{:else}
@@ -614,6 +606,10 @@
 		{/if}
 	</div>
 </main>
+
+{#if gameOver}
+	<GameOver onReset={handleGameOverReset} />
+{/if}
 
 <style>
 	/* ── Karte erscheint: slide von oben + fade ─────────────────────────────── */
