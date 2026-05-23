@@ -1,9 +1,77 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { getBankroll, resetBankroll } from '$lib/bankroll';
+	import { getStats, resetStats, winRate, sessionProfit, type SessionStats } from '$lib/stats';
+
 	let { data } = $props();
 
-	// Lokale Kopie der Games — wird nach Clear geleert
-	let games = $state(data.games);
+	// ─── Typen für History-Einträge ───────────────────────────────────────────
+
+	interface PlayerHandRecord {
+		cards:   string[];
+		score:   number;
+		bet:     number;
+		doubled: boolean;
+		result:  string | null;
+		payout:  number;
+	}
+
+	interface BankrollMeta {
+		payout?:         number;
+		bankrollBefore?: number;
+		bankrollAfter?:  number;
+		netResult?:      number;
+	}
+
+	interface BaccaratGame extends BankrollMeta {
+		game:        'baccarat';
+		bet:         number;
+		selectedBet: string;
+		playerCards: string[];
+		bankerCards: string[];
+		playerScore: number;
+		bankerScore: number;
+		result:      string;
+		playerWon:   boolean;
+		naturalHand: boolean;
+	}
+
+	interface BlackjackGameNew extends BankrollMeta {
+		game:        'blackjack';
+		bet:         number;
+		playerHands: PlayerHandRecord[];
+		dealerCards: string[];
+		dealerScore: number;
+		result:      string;
+	}
+
+	interface BlackjackGameLegacy extends BankrollMeta {
+		game:        'blackjack';
+		bet:         number;
+		playerScore: number;
+		dealerScore: number;
+		result:      string;
+		playerHands: undefined;
+	}
+
+	type GameRecord = BaccaratGame | BlackjackGameNew | BlackjackGameLegacy;
+
+	// ─── State ────────────────────────────────────────────────────────────────
+
+	let games    = $state<GameRecord[]>(Array.isArray((data as any)?.games) ? (data as any).games : []);
 	let errorMsg = $state('');
+	let bankroll = $state(1000);
+	let stats    = $state<SessionStats>({
+		handsPlayed: 0, wins: 0, losses: 0, pushes: 0,
+		biggestWin: 0, sessionStartBankroll: 1000,
+	});
+	let profit   = $derived(sessionProfit(stats, bankroll));
+	let wr       = $derived(winRate(stats));
+
+	onMount(() => {
+		bankroll = getBankroll();
+		stats    = getStats();
+	});
 
 	function isRed(suit: string): boolean {
 		return suit === '♥' || suit === '♦';
@@ -31,6 +99,13 @@
 			case 'bust':        return '💥 Bust';
 			default:            return result ?? '—';
 		}
+	}
+
+	function handleResetBankroll() {
+		const also = confirm('Bankroll auf 1000 CHF zurücksetzen?\n\nOK = auch Session-Stats zurücksetzen\nAbbrechen = nur Bankroll zurücksetzen');
+		resetBankroll();
+		bankroll = 1000;
+		if (also) { resetStats(1000); stats = getStats(); }
 	}
 
 	async function clearHistory() {
@@ -75,7 +150,44 @@
 			</div>
 		{/if}
 
-		<div class="mt-12 grid gap-6">
+		<!-- ── Session Stats kompakt ─────────────────────────────────────── -->
+		<div class="mt-6 rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+			<p class="mb-3 text-xs font-semibold tracking-widest text-slate-500 uppercase">Session Stats</p>
+			<div class="grid grid-cols-4 gap-2 sm:grid-cols-7">
+				<div class="col-span-2 rounded-xl bg-slate-800/60 px-3 py-2">
+					<p class="text-[10px] text-slate-500 uppercase tracking-wide">P&amp;L</p>
+					<p class="mt-0.5 text-lg font-bold {profit > 0 ? 'text-emerald-400' : profit < 0 ? 'text-red-400' : 'text-slate-400'}">
+						{profit > 0 ? '+' : ''}{profit.toFixed(2)} CHF
+					</p>
+				</div>
+				<div class="rounded-xl bg-slate-800/40 px-3 py-2 text-center">
+					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Hands</p>
+					<p class="mt-0.5 text-lg font-bold text-white">{stats.handsPlayed}</p>
+				</div>
+				<div class="rounded-xl bg-slate-800/40 px-3 py-2 text-center">
+					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Wins</p>
+					<p class="mt-0.5 text-lg font-bold {stats.wins > 0 ? 'text-emerald-400' : 'text-slate-400'}">{stats.wins}</p>
+				</div>
+				<div class="rounded-xl bg-slate-800/40 px-3 py-2 text-center">
+					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Loss</p>
+					<p class="mt-0.5 text-lg font-bold {stats.losses > 0 ? 'text-red-400' : 'text-slate-400'}">{stats.losses}</p>
+				</div>
+				<div class="rounded-xl bg-slate-800/40 px-3 py-2 text-center">
+					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Win%</p>
+					<p class="mt-0.5 text-lg font-bold {wr >= 50 ? 'text-emerald-400' : wr > 0 ? 'text-amber-400' : 'text-slate-400'}">
+						{stats.handsPlayed > 0 ? wr.toFixed(1) + '%' : '—'}
+					</p>
+				</div>
+				<div class="rounded-xl bg-slate-800/40 px-3 py-2 text-center">
+					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Best</p>
+					<p class="mt-0.5 text-lg font-bold {stats.biggestWin > 0 ? 'text-emerald-400' : 'text-slate-400'}">
+						{stats.biggestWin > 0 ? '+' + stats.biggestWin.toFixed(0) : '—'}
+					</p>
+				</div>
+			</div>
+		</div>
+
+		<div class="mt-8 grid gap-6">
 			{#if games.length === 0}
 				<p class="text-slate-500">Keine Runden gespeichert.</p>
 			{/if}

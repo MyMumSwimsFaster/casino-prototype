@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { fly, fade } from 'svelte/transition';
 	import { getBankroll, setBankroll, baccaratPayout, type BaccaratSelectedBet, type BaccaratResult } from '$lib/bankroll';
+	import { recordRound, type RoundOutcome } from '$lib/stats';
 
 	// ─── Types ────────────────────────────────────────────────────────────────
 	type Suit = '♠' | '♥' | '♦' | '♣';
@@ -177,6 +178,15 @@
 		payout = baccaratPayout(bet, selectedBet, round.result);
 		bankroll += payout;
 		setBankroll(bankroll);
+
+		// ── Stats erfassen ──────────────────────────────────────────────
+		// Push: Tie-Ergebnis bei P/B-Wette (payout === bet) oder kein Gewinn/Verlust
+		const netBac = Math.round((payout - bet) * 100) / 100;
+		const outcomeBac: RoundOutcome =
+			netBac > 0 ? 'win' :
+			netBac < 0 ? 'loss' :
+			'push';
+		recordRound(outcomeBac, netBac, 1);
 
 		try {
 			await fetch('/api/save-game', {

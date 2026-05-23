@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { fly, fade } from 'svelte/transition';
 	import { getBankroll, setBankroll, bjPayout, type BjHandResult } from '$lib/bankroll';
+	import { recordRound, type RoundOutcome } from '$lib/stats';
 
 	// ─── Types ────────────────────────────────────────────────────────────────
 	type Suit = '♠' | '♥' | '♦' | '♣';
@@ -309,6 +310,18 @@
 		saved = true;
 		const totalPayout = hands.reduce((s, h) => s + h.payout, 0);
 		const netResult   = Math.round((bankroll - bankrollBefore) * 100) / 100;
+
+		// ── Stats erfassen ──────────────────────────────────────────────
+		// Jede Hand zählt separat (inkl. Split-Hände)
+		for (const h of hands) {
+			const isWin  = h.result === 'win' || h.result === 'blackjack' || h.result === 'dealer-bust';
+			const isLoss = h.result === 'lose' || h.result === 'bust';
+			const outcome: RoundOutcome = isWin ? 'win' : isLoss ? 'loss' : 'push';
+			// Netto pro Hand: Payout - Einsatz (Einsatz wurde beim Deal abgezogen)
+			const handNet = Math.round((h.payout - h.bet) * 100) / 100;
+			recordRound(outcome, handNet, 1);
+		}
+
 		try {
 			await fetch('/api/save-game', {
 				method: 'POST',
