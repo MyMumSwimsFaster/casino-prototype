@@ -16,7 +16,6 @@ export async function POST({ request }) {
 			result:         body.result,
 			playerWon:      body.playerWon,
 			naturalHand:    body.naturalHand,
-			// Bankroll-Felder
 			payout:         body.payout         ?? null,
 			bankrollBefore: body.bankrollBefore  ?? null,
 			bankrollAfter:  body.bankrollAfter   ?? null,
@@ -32,11 +31,28 @@ export async function POST({ request }) {
 			dealerCards:    body.dealerCards,
 			dealerScore:    body.dealerScore,
 			result:         body.result,
-			// Bankroll-Felder
 			payout:         body.payout         ?? null,
 			bankrollBefore: body.bankrollBefore  ?? null,
 			bankrollAfter:  body.bankrollAfter   ?? null,
 			netResult:      body.netResult       ?? null,
+			// Insurance
+			insuranceOffered: body.insuranceOffered ?? false,
+			insuranceTaken:   body.insuranceTaken   ?? false,
+			insuranceBet:     body.insuranceBet     ?? 0,
+			insuranceResult:  body.insuranceResult  ?? null,
+			insurancePayout:  body.insurancePayout  ?? 0,
+			// Sidebets
+			perfectPairsBet:    body.perfectPairsBet    ?? 0,
+			perfectPairsResult: body.perfectPairsResult ?? null,
+			perfectPairsPayout: body.perfectPairsPayout ?? 0,
+			dealerBustBet:      body.dealerBustBet      ?? 0,
+			dealerBustResult:   body.dealerBustResult   ?? null,
+			dealerBustPayout:   body.dealerBustPayout   ?? 0,
+			// 21+3
+			twentyOneThreeBet:    body.twentyOneThreeBet    ?? 0,
+			twentyOneThreeResult: body.twentyOneThreeResult ?? null,
+			twentyOneThreePayout: body.twentyOneThreePayout ?? 0,
+			twentyOneThreeCards:  body.twentyOneThreeCards  ?? [],
 			createdAt:      new Date()
 		});
 	}

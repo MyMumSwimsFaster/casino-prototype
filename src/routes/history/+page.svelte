@@ -31,6 +31,24 @@
 		bankerScore?: number;
 		playerWon?:   boolean;
 		naturalHand?: boolean;
+		// Insurance (Blackjack)
+		insuranceOffered?:  boolean;
+		insuranceTaken?:    boolean;
+		insuranceBet?:      number;
+		insuranceResult?:   'won' | 'lost' | 'declined' | null;
+		insurancePayout?:   number;
+		// Sidebets (Blackjack)
+		perfectPairsBet?:    number;
+		perfectPairsResult?: 'perfect' | 'colored' | 'mixed' | 'lost' | null;
+		perfectPairsPayout?: number;
+		dealerBustBet?:      number;
+		dealerBustResult?:   'won' | 'lost' | null;
+		dealerBustPayout?:   number;
+		// 21+3 Sidebet
+		twentyOneThreeBet?:    number;
+		twentyOneThreeResult?: string | null;
+		twentyOneThreePayout?: number;
+		twentyOneThreeCards?:  string[];
 		// Legacy
 		playerScore_legacy?: number;
 		dealerScore_legacy?: number;
@@ -360,6 +378,34 @@
 								</div>
 							{/each}
 						</div>
+
+					<!-- Sidebets -->
+					{#if (game.perfectPairsBet ?? 0) > 0 || (game.dealerBustBet ?? 0) > 0 || (game.twentyOneThreeBet ?? 0) > 0}
+						<div class="mt-3 flex flex-wrap gap-2">
+							{#if (game.perfectPairsBet ?? 0) > 0}
+								<div class="rounded-lg px-3 py-1.5 text-xs font-semibold
+									{(game.perfectPairsPayout ?? 0) > 0 ? 'bg-violet-950/50 border border-violet-700/50 text-violet-300' : 'bg-slate-800 border border-slate-700 text-slate-500'}">
+									{(game.perfectPairsPayout ?? 0) > 0 ? `✅ PP +${(game.perfectPairsPayout ?? 0).toFixed(2)} CHF` : `❌ PP –${(game.perfectPairsBet ?? 0).toFixed(2)} CHF`}
+								</div>
+							{/if}
+							{#if (game.dealerBustBet ?? 0) > 0}
+								<div class="rounded-lg px-3 py-1.5 text-xs font-semibold
+									{game.dealerBustResult === 'won' ? 'bg-red-950/40 border border-red-700/50 text-red-300' : 'bg-slate-800 border border-slate-700 text-slate-500'}">
+									{game.dealerBustResult === 'won' ? `💥 DB +${(game.dealerBustPayout ?? 0).toFixed(2)} CHF` : `💥 DB –${(game.dealerBustBet ?? 0).toFixed(2)} CHF`}
+								</div>
+							{/if}
+							{#if (game.twentyOneThreeBet ?? 0) > 0}
+								<div class="rounded-lg px-3 py-1.5 text-xs font-semibold
+									{(game.twentyOneThreePayout ?? 0) > 0 ? 'bg-cyan-950/40 border border-cyan-700/50 text-cyan-300' : 'bg-slate-800 border border-slate-700 text-slate-500'}">
+									{#if (game.twentyOneThreePayout ?? 0) > 0}
+										✨ 21+3 {game.twentyOneThreeResult} · +{(game.twentyOneThreePayout ?? 0).toFixed(2)} CHF
+									{:else}
+										❌ 21+3 lost · –{(game.twentyOneThreeBet ?? 0).toFixed(2)} CHF
+									{/if}
+								</div>
+							{/if}
+						</div>
+					{/if}
 
 					<!-- ── Blackjack (altes Schema, rückwärtskompatibel) ──────── -->
 					{:else}
