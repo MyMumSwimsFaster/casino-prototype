@@ -9,7 +9,7 @@
 	// ─── Types ────────────────────────────────────────────────────────────────
 	type Suit = '♠' | '♥' | '♦' | '♣';
 	type Rank = 'A'|'2'|'3'|'4'|'5'|'6'|'7'|'8'|'9'|'10'|'J'|'Q'|'K';
-	type Phase = 'setup' | 'insurance' | 'player-turn' | 'dealer-turn' | 'result';
+	type Phase = 'setup' | 'redealing' | 'insurance' | 'player-turn' | 'dealer-turn' | 'result';
 	// BetTarget bleibt für interne addChip-Logik
 	type BetTarget = 'main' | 'pp' | 'db' | 'tf';
 	type InsuranceResult = 'won' | 'lost' | 'declined' | null;
@@ -250,6 +250,36 @@
 
 	let displayNetResult = $derived(Math.round((bankroll - bankrollBefore) * 100) / 100);
 
+	// ── Result Tier System ─────────────────────────────────────────────────
+	type ResultTier = 'blackjack' | 'natural' | 'big-win' | 'medium-win' | 'small-win'
+		| 'push' | 'small-loss' | 'heavy-loss';
+	function getResultTier(net: number, isNatural = false, isBJ = false): ResultTier {
+		if (isBJ)       return 'blackjack';
+		if (isNatural)  return 'natural';
+		if (net >  200) return 'big-win';
+		if (net >   40) return 'medium-win';
+		if (net >    0) return 'small-win';
+		if (net ===  0) return 'push';
+		if (net > -100) return 'small-loss';
+		return 'heavy-loss';
+	}
+	let animatedNet    = $state(0);
+	let netAnimRunning = $state(false);
+	function animateNet(target: number) {
+		if (target === 0) { animatedNet = 0; return; }
+		animatedNet = 0; netAnimRunning = true;
+		const dur = Math.min(700, 200 + Math.abs(target) * 0.4);
+		const steps = 28; const step = target / steps; const delay = dur / steps;
+		let i = 0;
+		const tick = () => {
+			i++;
+			if (i >= steps) { animatedNet = target; netAnimRunning = false; return; }
+			animatedNet = Math.round(step * i * 100) / 100;
+			setTimeout(tick, delay);
+		};
+		setTimeout(tick, 300);
+	}
+
 	let muted = $state(false);
 	function toggleMute() { muted = _toggleMuted(); }
 
@@ -351,83 +381,105 @@
 		dbResult = null; dbPayout = 0;
 		tfResult = null; tfPayout = 0; tfCards = []; tfCards = [];
 
+		// Draw all 4 cards immediately (for logic), but reveal them sequentially in state
 		const p1 = draw(), p2 = draw(), d1 = draw(), d2 = draw();
-		dealerCards       = [d1, d2];
-		dealerDealIndexes = [1, 3];
-		hands = [{ cards: [p1, p2], bet: mainBet, doubled: false, done: false, result: null, payout: 0, cardDealIndexes: [0, 2] }];
 		globalCardIdx = 4;
 		activeIdx = 0;
+		resetScoreVisibility();
 
-		[0, 140, 280, 420].forEach(delay => setTimeout(() => sfx.cardDeal(), delay));
+		// STEP 1 — Player card 1 (t=0)
+		hands = [{ cards: [p1], bet: mainBet, doubled: false, done: false, result: null, payout: 0, cardDealIndexes: [0] }];
+		dealerCards = []; dealerDealIndexes = [];
+		sfx.cardDeal();
+		scheduleScoreReveal(0, 0);
 
-		// ── 21+3: direkt nach Deal auswerten (Player 1, Player 2, Dealer Upcard) ──
-		if (tfBet > 0) {
-			const r = evaluateTF(p1, p2, d1); // d1 = Dealer Upcard, d2 = Hole Card (nicht verwendet)
-			tfResult = r;
-			tfCards  = [cardLabel(p1), cardLabel(p2), cardLabel(d1)];
-			const mult = tfMultiplier(r);
-			if (mult > 0) {
-				tfPayout  = Math.round(tfBet * (1 + mult) * 100) / 100;
-				bankroll += tfPayout;
-				setBankroll(bankroll);
-			} else {
-				tfPayout = 0;
+		// STEP 2 — Dealer upcard (t=180ms)
+		setTimeout(() => {
+			sfx.cardDeal();
+			dealerCards = [d1]; dealerDealIndexes = [1];
+			scheduleDealerScoreReveal(1);
+		}, 180);
+
+		// STEP 3 — Player card 2 (t=360ms)
+		setTimeout(() => {
+			sfx.cardDeal();
+			hands = [{ ...hands[0], cards: [p1, p2], cardDealIndexes: [0, 2] }];
+			scheduleScoreReveal(0, 2);
+		}, 360);
+
+		// STEP 4 — Dealer hole card, face down (t=540ms)
+		setTimeout(() => {
+			sfx.cardDeal();
+			dealerCards = [d1, d2]; dealerDealIndexes = [1, 3];
+			// hole card (idx 3) score revealed only on holeRevealed=true
+		}, 540);
+
+		// ── Post-deal logic runs after all 4 cards are sequentially dealt (t≥600ms) ──
+		setTimeout(() => {
+			// ── 21+3: direkt nach Deal auswerten (Player 1, Player 2, Dealer Upcard) ──
+			if (tfBet > 0) {
+				const r = evaluateTF(p1, p2, d1);
+				tfResult = r; tfCards = [cardLabel(p1), cardLabel(p2), cardLabel(d1)];
+				const mult = tfMultiplier(r);
+				if (mult > 0) { tfPayout = Math.round(tfBet*(1+mult)*100)/100; bankroll+=tfPayout; setBankroll(bankroll); }
+				else { tfPayout = 0; }
+			} else { tfCards = []; }
+
+			// ── Perfect Pairs: direkt nach Deal auswerten ─────────────────────────────
+			if (ppBet > 0) {
+				const c1 = p1, c2 = p2;
+				if (c1.rank === c2.rank) {
+					const r = evaluatePP(c1, c2);
+					ppResult = r;
+					const mult = ppMultiplier(r);
+					ppPayout = Math.round(ppBet*(1+mult)*100)/100;
+					bankroll += ppPayout; setBankroll(bankroll);
+				} else { ppResult = 'lost'; ppPayout = 0; }
 			}
-		} else {
-			tfCards = [];
-		}
 
-		// ── Perfect Pairs: direkt nach Deal auswerten ──────────────────────
-		if (ppBet > 0) {
-			const c1 = hands[0].cards[0], c2 = hands[0].cards[1];
-			if (c1.rank === c2.rank) {
-				const r = evaluatePP(c1, c2);
-				ppResult = r;
-				const mult = ppMultiplier(r);
-				ppPayout = Math.round(ppBet * (1 + mult) * 100) / 100;
-				bankroll += ppPayout;
-				setBankroll(bankroll);
-			} else {
-				ppResult = 'lost';
-				ppPayout = 0;
-			}
-		}
+			const uv = bjValue(d1.rank);
 
-		const uv = bjValue(d1.rank);
-
-		if (uv === 11) {
-			// Dealer shows Ace → Insurance anbieten, Peek erst nach Entscheidung
-			insuranceOffered = true;
-			phase = 'insurance';
-			return;
-		}
-
-		if (uv === 10) {
-			// 10-Wert: automatischer Peek ohne Insurance
-			if (isBlackjack(dealerCards)) {
-				holeRevealed = true;
-				statusMsg = 'Dealer has Blackjack!';
-				const r = isBlackjack(hands[0].cards) ? 'push' : 'lose';
-				const p = bjPayout(hands[0].bet, r);
-				hands = [{ ...hands[0], result: r, done: true, payout: p }];
-				bankroll += p;
-				// DB: Dealer hat kein Bust → lost
-				if (dbBet > 0) { dbResult = 'lost'; dbPayout = 0; }
-				setBankroll(bankroll);
-				phase = 'result';
-				saveRound();
-				if (bankroll <= 0) { startGameOverDelay(); }
-				setTimeout(() => { if (r === 'push') sfx.win(); else sfx.lose(); }, 400);
+			if (uv === 11) {
+				statusMsg = 'Dealer shows Ace…';
+				insuranceOffered = true;
+				phase = 'insurance';
 				return;
-			} else {
-				statusMsg = 'Dealer checked — no Blackjack.';
 			}
-		}
 
-		afterInsuranceDecision();
+			if (uv === 10) {
+				// 10-Wert: automatischer Peek ohne Insurance
+				if (isBlackjack(dealerCards)) {
+					holeRevealed = true;
+					scheduleDealerScoreReveal(3);
+					statusMsg = 'Dealer has Blackjack!';
+					const r = isBlackjack(hands[0].cards) ? 'push' : 'lose';
+					const p = bjPayout(hands[0].bet, r);
+					hands = [{ ...hands[0], result: r, done: true, payout: p }];
+					bankroll += p;
+					if (dbBet > 0) { dbResult = 'lost'; dbPayout = 0; }
+					setBankroll(bankroll);
+					// Delay result until score visible
+					setTimeout(() => {
+						phase = 'result';
+						saveRound();
+						setTimeout(() => animateNet(displayNetResult), 50);
+						if (bankroll <= 0) { startGameOverDelay(); }
+						setTimeout(() => { if (r === 'push') sfx.win(); else sfx.lose(); }, 400);
+					}, 850);
+					return;
+				}
+			}
+
+			// ── Player Blackjack check ──────────────────────────────────────────────
+			if (isBlackjack(hands[0].cards)) {
+				sfx.blackjack();
+			}
+
+			phase = 'player-turn';
+			afterInsuranceDecision();
+		}, 620);
 	}
 
-	// ─── Insurance ────────────────────────────────────────────────────────────
 	function takeInsurance() {
 		if (!canAffordInsurance) return;
 		insuranceTaken = true;
@@ -446,7 +498,9 @@
 	function resolveInsurance() {
 		if (isBlackjack(dealerCards)) {
 			holeRevealed = true;
-			statusMsg = 'Dealer has Blackjack!';
+			statusMsg = '♠ Dealer Blackjack!';
+			// Schedule dealer score reveal for hole card (dealIdx=3)
+			scheduleDealerScoreReveal(3);
 			if (insuranceTaken) {
 				insurancePayout  = insuranceBet * 3;
 				insuranceResult  = 'won';
@@ -460,9 +514,13 @@
 			bankroll += p;
 			if (dbBet > 0) { dbResult = 'lost'; dbPayout = 0; }
 			setBankroll(bankroll);
-			phase = 'result';
-			saveRound();
-			if (bankroll <= 0) { startGameOverDelay(); }
+			// Delay result until score is visually updated (460ms reveal + 300ms drama)
+			setTimeout(() => {
+				phase = 'result';
+				saveRound();
+				if (bankroll <= 0) { startGameOverDelay(); }
+				setTimeout(() => animateNet(displayNetResult), 50);
+			}, 780);
 			setTimeout(() => {
 				if (insuranceTaken && insuranceResult === 'won') sfx.win();
 				else if (r === 'push') sfx.win(); else sfx.lose();
@@ -475,6 +533,30 @@
 		}
 	}
 
+	// ── Player Blackjack Resolution ─────────────────────────────────────────────
+	// Reveal dealer hole card, show final dealer score, then evaluate.
+	// Dealer must NOT draw — only peek to check for push.
+	async function resolvePlayerBlackjack() {
+		const pause = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+		statusMsg = 'Dealer reveals…';
+		await pause(420);
+		holeRevealed = true;
+		phase = 'dealer-turn';           // show dealer cards area
+		scheduleDealerScoreReveal(3);    // hole card now visible
+		await pause(520);                // let score appear
+		if (isBlackjack(dealerCards)) {
+			statusMsg = '♠ Dealer Blackjack — Push';
+			// Overwrite hand result: push instead of blackjack
+			const pPush = bjPayout(hands[0].bet, 'push');
+			hands = [{ ...hands[0], result: 'push', done: true, payout: pPush }];
+			await pause(600);
+		} else {
+			statusMsg = '♠ BLACKJACK';
+			await pause(500);
+		}
+		evaluateResults();
+	}
+
 	function afterInsuranceDecision() {
 		phase = 'player-turn';
 		if (isBlackjack(hands[0].cards)) {
@@ -482,7 +564,10 @@
 			hands = [{ ...hands[0], result: 'blackjack', done: true, payout: p }];
 			statusMsg = 'Blackjack! 🎉';
 			sfx.blackjack();
-			startDealerTurn();
+			// Player BJ: reveal hole card + show dealer score, then resolve —
+			// DO NOT call startDealerTurn() — dealer must not draw any cards.
+			resolvePlayerBlackjack();
+			return;
 		}
 	}
 
@@ -503,8 +588,15 @@
 		sfx.cardDeal();
 		const newCard=draw(), newIdx=globalCardIdx++;
 		const h={...ch(),cards:[...ch().cards,newCard],cardDealIndexes:[...ch().cardDealIndexes,newIdx]};
-		if(handScore(h.cards)>21){h.done=true;h.result='bust';statusMsg='Bust!';}
-		updateHand(h); if(h.done) advanceHand();
+		const isBust = handScore(h.cards) > 21;
+		if(isBust){h.done=true;h.result='bust';}
+		updateHand(h);
+		scheduleScoreReveal(activeIdx, newIdx);
+		if(isBust){
+			// Show 'Bust!' status only after score is visible
+			setTimeout(() => { statusMsg = 'Bust!'; }, 480);
+		}
+		if(h.done) setTimeout(() => advanceHand(), 320 + 80);
 	}
 	function stand() { if(!canStand()) return; updateHand({...ch(),done:true}); advanceHand(); }
 	function doubleDown() {
@@ -513,7 +605,9 @@
 		const newCard=draw(), newIdx=globalCardIdx++;
 		const h={...ch(),bet:ch().bet*2,doubled:true,cards:[...ch().cards,newCard],cardDealIndexes:[...ch().cardDealIndexes,newIdx],done:true};
 		if(handScore(h.cards)>21){h.result='bust';statusMsg='Bust after Double!';}
-		updateHand(h); advanceHand();
+		updateHand(h);
+		scheduleScoreReveal(activeIdx, newIdx);
+		setTimeout(() => advanceHand(), 320 + 80);
 	}
 	function split() {
 		if(!canSplit()) return;
@@ -523,6 +617,8 @@
 		const hand1:PlayerHand={cards:[h.cards[0],c1],bet:mainBet,doubled:false,done:isAceSplit,result:null,payout:0,cardDealIndexes:[h.cardDealIndexes[0],i1]};
 		const hand2:PlayerHand={cards:[h.cards[1],c2],bet:mainBet,doubled:false,done:isAceSplit,result:null,payout:0,cardDealIndexes:[h.cardDealIndexes[1],i2]};
 		hands=[...hands.slice(0,activeIdx),hand1,hand2,...hands.slice(activeIdx+1)];
+		scheduleScoreReveal(activeIdx, i1);
+		setTimeout(() => scheduleScoreReveal(activeIdx+1, i2), 140);
 		if(isAceSplit){statusMsg='Aces split — one card each.'; advanceHand();}
 		else{statusMsg=`Playing hand 1 of 2`;}
 	}
@@ -531,25 +627,98 @@
 		if(next!==-1){activeIdx=next;statusMsg=`Playing hand ${activeIdx+1} of ${hands.length}`;}
 		else{
 			if(hands.every(h=>h.result==='bust')){
-				// All bust → Dealer doesn't play → DB lost
+				// All bust — reveal hole card + show dealer score before result
 				if(dbBet>0){dbResult='lost';dbPayout=0;}
-				holeRevealed=true; phase='result'; saveRound();
-				if (bankroll <= 0) { startGameOverDelay(); }
+				statusMsg = '';
+				holeRevealed = true;
+				scheduleDealerScoreReveal(3); // hole card dealIdx=3
+				// Wait for hole card anim + score reveal before showing result
+				setTimeout(() => {
+					phase = 'result';
+					saveRound();
+					setTimeout(() => animateNet(displayNetResult), 50);
+					if (bankroll <= 0) { startGameOverDelay(); }
+				}, 700);
 			} else { startDealerTurn(); }
 		}
 	}
 
 	// ─── Dealer Turn ──────────────────────────────────────────────────────────
-	function startDealerTurn() {
-		holeRevealed=true; phase='dealer-turn';
-		let dCards=[...dealerCards], dIndexes=[...dealerDealIndexes];
-		while(true){
-			const s=handScore(dCards);
-			if(s>17) break;
-			if(s===17){if(!isSoft17(dCards)) break;}
-			dCards=[...dCards,draw()]; dIndexes=[...dIndexes,globalCardIdx++];
+	// ─── Cinematic Dealer Turn ────────────────────────────────────────────────
+	// Reveals hole card, draws cards one by one with pacing + status messages.
+	async function startDealerTurn() {
+		const pause = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+		// ── Step 1: Reveal hole card with drama ──────────────────────────
+		statusMsg = 'Dealer reveals…';
+		await pause(420);
+		holeRevealed = true;
+		phase = 'dealer-turn';
+		scheduleDealerScoreReveal(3); // hole card was dealt at idx 3
+		const holeScore = handScore(dealerCards);
+
+		// Blackjack check (already resolved via insurance — this covers direct path)
+		if (isBlackjack(dealerCards)) {
+			statusMsg = '♠ Dealer Blackjack';
+			// Wait for: hole card animation (420ms) + score reveal (460ms) + dramatic pause
+			await pause(950);
+			evaluateResults();
+			return;
 		}
-		dealerCards=dCards; dealerDealIndexes=dIndexes;
+
+		// ── Step 2: Announce dealer total ────────────────────────────────
+		if (holeScore >= 17) {
+			statusMsg = holeScore === 17
+				? 'Dealer stands on ' + holeScore
+				: 'Dealer has ' + holeScore;
+			await pause(700);
+			evaluateResults();
+			return;
+		}
+
+		statusMsg = 'Dealer has ' + holeScore + '…';
+		await pause(500);
+
+		// ── Step 3: Draw cards one by one with pacing ────────────────────
+		let dCards  = [...dealerCards];
+		let dIdx    = [...dealerDealIndexes];
+
+		while (true) {
+			const score = handScore(dCards);
+			if (score > 17) break;
+			if (score === 17 && !isSoft17(dCards)) break;
+
+			// Draw one card and update state so it animates in
+			statusMsg = 'Dealer draws…';
+			const card = draw();
+			const newDealIdx = globalCardIdx++;
+			dIdx.push(newDealIdx);
+			dCards = [...dCards, card];
+			dealerCards        = dCards;
+			dealerDealIndexes  = dIdx;
+			scheduleDealerScoreReveal(newDealIdx);
+
+			const newScore = handScore(dCards);
+			await pause(520); // card lands + score reveals
+
+			if (newScore > 21) {
+				// Wait for score to update before announcing bust
+				await pause(500);
+				statusMsg = '💥 Dealer busts with ' + newScore + '!';
+				await pause(700);
+				break;
+			} else if (newScore >= 17) {
+				statusMsg = newScore === 17
+					? 'Dealer stands on ' + newScore
+					: 'Dealer has ' + newScore;
+				await pause(600);
+				break;
+			} else {
+				statusMsg = 'Dealer has ' + newScore + '…';
+				await pause(420);
+			}
+		}
+
 		evaluateResults();
 	}
 
@@ -583,8 +752,22 @@
 		const totalPayout=hands.reduce((s,h)=>s+h.payout,0);
 		bankroll+=totalPayout;
 		setBankroll(bankroll);
-		statusMsg=''; phase='result';
+
+		// ── Dramatic final status message ─────────────────────────────────
+		const anyBJ   = hands.some(h=>h.result==='blackjack');
+		const anyWin  = hands.some(h=>h.result==='win'||h.result==='dealer-bust');
+		const allBust = hands.every(h=>h.result==='bust');
+		const allPush = hands.every(h=>h.result==='push');
+		if      (anyBJ)   statusMsg = '♠ BLACKJACK';
+		else if (dBust)   statusMsg = '💥 Dealer Busts — You Win!';
+		else if (anyWin)  statusMsg = '✓ You Win';
+		else if (allPush) statusMsg = '◈ Push — Bet Returned';
+		else if (allBust) statusMsg = '';
+		else              statusMsg = 'Dealer Wins';
+
+		phase='result';
 		saveRound();
+		setTimeout(() => animateNet(displayNetResult), 50);
 
 		// If bankrupt after this round → start 5-second delay
 		if (bankroll <= 0) { startGameOverDelay(); }
@@ -669,14 +852,19 @@
 			replayError = 'Nicht genügend Guthaben für dieselben Einsätze.';
 			return;
 		}
+		// ── Phase 'redealing': kills result overlay + EOR buttons WITHOUT showing setup ──
+		phase = 'redealing';
 		dealerCards=[]; dealerDealIndexes=[]; hands=[]; activeIdx=0;
 		holeRevealed=false; statusMsg=''; saved=false; betError='';
-		globalCardIdx=0;
+		globalCardIdx=0; animatedNet=0; netAnimRunning=false;
 		insuranceOffered=false; insuranceTaken=false; insuranceBet=0; insuranceResult=null; insurancePayout=0;
 		ppResult=null; ppPayout=0; dbResult=null; dbPayout=0;
 		tfResult=null; tfPayout=0; tfCards=[];
+		resetScoreVisibility();
+		// Restore same bets — no betting screen shown
 		mainBet=lastMainBet; ppBet=lastPpBet; dbBet=lastDbBet; tfBet=lastTfBet;
-		deal();
+		// Single tick for Svelte to flush phase change, then deal directly
+		setTimeout(() => deal(), 0);
 	}
 
 	function newBet() {
@@ -684,9 +872,11 @@
 		phase='setup'; dealerCards=[]; dealerDealIndexes=[]; hands=[]; activeIdx=0;
 		holeRevealed=false; statusMsg=''; saved=false; betError=''; replayError='';
 		mainBet=0; ppBet=0; dbBet=0; tfBet=0; globalCardIdx=0;
+		animatedNet=0; netAnimRunning=false;
 		insuranceOffered=false; insuranceTaken=false; insuranceBet=0; insuranceResult=null; insurancePayout=0;
 		ppResult=null; ppPayout=0; dbResult=null; dbPayout=0;
 		tfResult=null; tfPayout=0; tfCards=[];
+		resetScoreVisibility();
 	}
 
 	function newRound() { newBet(); }
@@ -709,7 +899,61 @@
 			default:          return 'text-red-400';
 		}
 	}
-	function dealDelay(idx:number): number { return idx*140; }
+	function dealDelay(idx:number): number { return idx*180; }
+
+	// ── Score Delay System ────────────────────────────────────────────────────
+	// Tracks the "last card added" index per hand and for dealer.
+	// Score is only shown once the card animation has finished.
+	// visibleScoreReady[hi] = cardDealIndex of last card that has "landed"
+	let visibleScoreReady  = $state<Record<number,number>>({});  // hand index → last visible deal-idx
+	let dealerScoreReady   = $state(-1);   // dealer: last visible deal-idx (-1 = show hole only)
+	// scoreTimer: cleared when a new round starts
+	let scoreTimers: ReturnType<typeof setTimeout>[] = [];
+
+	// Call after adding a card to a player hand: reveals score after anim finishes
+	function scheduleScoreReveal(handIdx: number, dealIdx: number) {
+		const t = setTimeout(() => {
+			visibleScoreReady = { ...visibleScoreReady, [handIdx]: dealIdx };
+		}, 460);
+		scoreTimers.push(t);
+	}
+	// For dealer cards
+	function scheduleDealerScoreReveal(dealIdx: number) {
+		const t = setTimeout(() => {
+			dealerScoreReady = dealIdx;
+		}, 460);
+		scoreTimers.push(t);
+	}
+	// Reset all score visibility (new round)
+	function resetScoreVisibility() {
+		scoreTimers.forEach(clearTimeout);
+		scoreTimers = [];
+		visibleScoreReady = {};
+		dealerScoreReady  = -1;
+	}
+
+	// Visible score for a player hand: show only cards that have "landed"
+	function visibleHandScore(hand: PlayerHand): number | null {
+		const ready = visibleScoreReady[hands.indexOf(hand)] ?? -1;
+		if (hand.cardDealIndexes.length === 0) return null;
+		// Find cards whose dealIndex <= ready
+		const visCards = hand.cards.filter((_, i) => (hand.cardDealIndexes[i] ?? 999) <= ready);
+		if (visCards.length === 0) return null;
+		return handScore(visCards);
+	}
+
+	// Visible dealer score: show only landed cards
+	function visibleDealerScore(): number | string | null {
+		if (dealerCards.length === 0) return null;
+		if (!holeRevealed) {
+			// Always show upcard score immediately (index 0)
+			return handScore([dealerCards[0]]) + ' + ?';
+		}
+		// Show all cards that have landed
+		const visCards = dealerCards.filter((_, i) => (dealerDealIndexes[i] ?? 999) <= dealerScoreReady);
+		if (visCards.length === 0) return null;
+		return handScore(visCards);
+	}
 </script>
 <!-- ═══════════════════════════════════════════════════════
      BLACKJACK — Casino Table Layout
@@ -784,7 +1028,7 @@
                     {/each}
                   </div>
                   <span class="bet-pill">{tfBet}</span>
-                  <button onclick={(e)=>{e.stopPropagation();clearBetField('tf');}} class="x-btn">✕</button>
+                  <span role="button" tabindex="0" onclick={(e)=>{e.stopPropagation();clearBetField('tf');}} onkeydown={(e)=>{if(e.key==='Enter'){e.stopPropagation();clearBetField('tf');}}} class="x-btn">✕</span>
                 {:else}
                   <div class="spot-idle-content">
                     <span class="spot-name tf-name">21+3</span>
@@ -826,7 +1070,7 @@
                     {/each}
                   </div>
                   <span class="bet-pill">{ppBet}</span>
-                  <button onclick={(e)=>{e.stopPropagation();clearBetField('pp');}} class="x-btn">✕</button>
+                  <span role="button" tabindex="0" onclick={(e)=>{e.stopPropagation();clearBetField('pp');}} onkeydown={(e)=>{if(e.key==='Enter'){e.stopPropagation();clearBetField('pp');}}} class="x-btn">✕</span>
                 {:else}
                   <div class="spot-idle-content">
                     <span class="spot-name pp-name">PP</span>
@@ -865,7 +1109,7 @@
                     {/each}
                   </div>
                   <span class="bet-pill bet-pill-main">{mainBet} CHF</span>
-                  <button onclick={(e)=>{e.stopPropagation();clearBetField('main');}} class="x-btn x-btn-main">✕</button>
+                  <span role="button" tabindex="0" onclick={(e)=>{e.stopPropagation();clearBetField('main');}} onkeydown={(e)=>{if(e.key==='Enter'){e.stopPropagation();clearBetField('main');}}} class="x-btn x-btn-main">✕</span>
                 {:else}
                   <div class="spot-idle-content">
                     <span class="spot-name main-name">MAIN BET</span>
@@ -903,7 +1147,7 @@
                     {/each}
                   </div>
                   <span class="bet-pill">{dbBet}</span>
-                  <button onclick={(e)=>{e.stopPropagation();clearBetField('db');}} class="x-btn">✕</button>
+                  <span role="button" tabindex="0" onclick={(e)=>{e.stopPropagation();clearBetField('db');}} onkeydown={(e)=>{if(e.key==='Enter'){e.stopPropagation();clearBetField('db');}}} class="x-btn">✕</span>
                 {:else}
                   <div class="spot-idle-content">
                     <span class="spot-name db-name">DB</span>
@@ -957,17 +1201,20 @@
             </div>
           {/each}
         </div>
-        {#if dealerCards.length > 0}
-          <div class="score-pill" transition:fade={{duration:200}}>
-            {holeRevealed ? handScore(dealerCards) : `${handScore([dealerCards[0]])} + ?`}
-          </div>
-        {/if}
+        {#if visibleDealerScore() !== null}
+            <div class="score-pill" transition:fade={{duration:200}}>
+              {visibleDealerScore()}
+            </div>
+          {/if}
       </div>
 
       <!-- STATUS -->
       {#if statusMsg}
-        <div class="status-wrap" transition:fade={{duration:180}}>
-          <span class="status-pill">{statusMsg}</span>
+        <div class="status-wrap" transition:fade={{duration:200}}>
+          <span class="status-pill
+            {statusMsg.includes('BLACKJACK')?'sp-bj':statusMsg.includes('Busts')||statusMsg.includes('busts')?'sp-bust':statusMsg.includes('Win')?'sp-win':statusMsg.includes('Push')?'sp-push':statusMsg.includes('Wins')?'sp-lose':''}">
+            {statusMsg}
+          </span>
         </div>
       {/if}
 
@@ -1017,7 +1264,12 @@
               {#if hands.length>1}<span class="badge-hand">Hand {hi+1}</span>{/if}
               {#if hi===activeIdx&&phase==='player-turn'}<span class="badge-turn" transition:fade={{duration:180}}>Your turn</span>{/if}
               {#if hand.doubled}<span class="badge-dbl" transition:fade={{duration:180}}>2×</span>{/if}
-              <div class="score-pill {isBust?'pill-bust':isBJ?'pill-bj':''}">{handScore(hand.cards)}</div>
+              {#if visibleHandScore(hand) !== null}
+                <div class="score-pill {isBust?'pill-bust':isBJ?'pill-bj':''}"
+                  transition:fade={{duration:180}}>
+                  {visibleHandScore(hand)}
+                </div>
+              {/if}
             </div>
             <div class="cards-fan {isBust?'bust-shake':''} {isBJ?'bj-glow':''}">
               {#each hand.cards as card, ci (ci)}
@@ -1039,7 +1291,7 @@
 
       <!-- RESULT OVERLAY -->
       {#if phase === 'result'}
-        <div class="result-overlay" transition:fly={{y:14,duration:300}}>
+        <div class="result-overlay" in:fly={{y:14,duration:300}} out:fade={{duration:0}}>
           {#each hands as hand, hi}
             <div class="result-row">
               <span class="result-lbl">{hands.length>1?`Hand ${hi+1}`:'Result'}</span>
@@ -1068,7 +1320,11 @@
   <!-- CONTROLS ───────────────────────────────────────────── -->
   <footer class="bj-controls">
 
-    {#if phase === 'setup'}
+    {#if phase === 'redealing'}
+      <!-- Redealing: empty footer, same bets retained internally -->
+      <div class="phase-hint" style="letter-spacing:.2em;opacity:.3">— Same bet, next hand —</div>
+
+    {:else if phase === 'setup'}
       <!-- CHIP RACK -->
       <div class="chip-rack">
         {#each CHIPS as chip}
@@ -1235,7 +1491,7 @@
   background-size:250px;
 }
 /* Gold border */
-.felt::before { content:'';position:absolute;inset:0;box-shadow:inset 0 0 0 1px rgba(180,140,40,.12),inset 0 0 50px rgba(0,0,0,.3);pointer-events:none;z-index:3; }
+.felt::before { content:'';position:absolute;inset:0;background:radial-gradient(ellipse 88% 88% at 50% 50%,transparent 38%,rgba(0,0,0,.20) 68%,rgba(0,0,0,.48) 100%);box-shadow:inset 0 0 0 1px rgba(180,140,40,.15),inset 0 0 60px rgba(0,0,0,.32);pointer-events:none;z-index:3; }
 /* Wood arc */
 .felt::after { content:'';position:absolute;bottom:-55px;left:-12%;right:-12%;height:110px;background:linear-gradient(to bottom,#2c1a09,#190f05);border-radius:50% 50% 0 0/75px 75px 0 0;box-shadow:0 -3px 14px rgba(0,0,0,.55);z-index:4; }
 
@@ -1459,20 +1715,43 @@ em { font-style:normal; font-size:9px; margin-left:5px; }
 .card-ol   { margin-left:-16px; }
 
 .crd {
-  width:58px; height:84px; border-radius:7px;
-  border:1px solid rgba(0,0,0,.2);
-  box-shadow:0 6px 20px rgba(0,0,0,.6),0 1px 3px rgba(0,0,0,.4);
-  background:#fff; position:relative;
+  width:60px; height:88px; border-radius:8px;
+  /* Layered shadows: ambient + contact + edge */
+  border: 1px solid rgba(0,0,0,.15);
+  box-shadow:
+    0 10px 30px rgba(0,0,0,.65),
+    0 4px 8px rgba(0,0,0,.45),
+    0 1px 0 rgba(255,255,255,.9) inset,   /* top edge highlight */
+    0 -1px 0 rgba(0,0,0,.15) inset;        /* bottom edge shadow */
+  background: linear-gradient(160deg, #ffffff 0%, #f8f8f6 100%); /* very subtle paper tone */
+  position:relative;
   display:flex; align-items:center; justify-content:center;
 }
-.crd-r { color:#dc2626; }
-.crd-b { color:#0f172a; }
+.crd-r { color:#c41c1c; text-shadow: 0 1px 2px rgba(196,28,28,.2); }
+.crd-b { color:#0d1526; text-shadow: 0 1px 2px rgba(0,0,0,.2); }
 .crd-fade { opacity:.5; }
-.cr-tl { position:absolute;top:3px;left:5px;font-size:11px;font-weight:900;line-height:1; }
-.cr-s  { font-size:20px;font-weight:700;line-height:1; }
+.cr-tl { position:absolute;top:3px;left:5px;font-size:12px;font-weight:900;line-height:1;letter-spacing:-.02em; }
+.cr-s  { font-size:22px;font-weight:800;line-height:1;filter:drop-shadow(0 1px 1px rgba(0,0,0,.12)); }
 .cr-br { position:absolute;bottom:3px;right:5px;font-size:11px;font-weight:900;line-height:1;transform:rotate(180deg); }
-.hole-crd { background:#1a2744;overflow:hidden; }
-.hole-pat { position:absolute;inset:4px;border-radius:4px;background:repeating-linear-gradient(45deg,transparent,transparent 3px,rgba(255,255,255,.04) 3px,rgba(255,255,255,.04) 6px); }
+.hole-crd {
+  background: linear-gradient(145deg, #1c2d52, #141e38);
+  overflow:hidden;
+  box-shadow:
+    0 10px 30px rgba(0,0,0,.75),
+    0 4px 8px rgba(0,0,0,.55),
+    0 0 0 1px rgba(255,255,255,.06) inset,
+    0 0 20px rgba(50,80,160,.15);
+  animation: holePulse 2.8s ease-in-out infinite;
+}
+@keyframes holePulse {
+  0%,100% { box-shadow: 0 10px 30px rgba(0,0,0,.75),0 4px 8px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06) inset,0 0 16px rgba(50,80,160,.12); }
+  50%      { box-shadow: 0 10px 30px rgba(0,0,0,.75),0 4px 8px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.08) inset,0 0 28px rgba(60,100,200,.22); }
+}
+.hole-pat { position:absolute;inset:4px;border-radius:4px;
+  background:
+    repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(255,255,255,.035) 4px,rgba(255,255,255,.035) 8px),
+    repeating-linear-gradient(-45deg,transparent,transparent 4px,rgba(255,255,255,.025) 4px,rgba(255,255,255,.025) 8px);
+}
 .hole-ico { position:relative;z-index:2;font-size:22px;color:rgba(255,255,255,.15); }
 
 /* Score pill */
@@ -1619,17 +1898,41 @@ em { font-style:normal; font-size:9px; margin-left:5px; }
 @keyframes pulse-slow { 0%,100%{opacity:.45;} 50%{opacity:.12;} }
 .animate-pulse-slow { animation:pulse-slow 1.8s ease-in-out infinite; }
 
-.card-enter { animation:cardIn 270ms cubic-bezier(0.22,1,0.36,1) both; }
-@keyframes cardIn { from{opacity:0;transform:translateY(-18px) scale(.9);} to{opacity:1;transform:translateY(0) scale(1);} }
+.card-enter { animation:cardIn 420ms cubic-bezier(0.22,1,0.36,1) both; }
+@keyframes cardIn {
+  0%   { opacity:0; transform:translateY(-28px) scale(.88) rotate(-1.5deg); }
+  70%  { opacity:1; transform:translateY(3px) scale(1.01) rotate(.3deg); }
+  85%  { transform:translateY(-1px) scale(1.002) rotate(0deg); }
+  100% { opacity:1; transform:translateY(0) scale(1) rotate(0deg); }
+}
 
-.card-flip { animation:cardFlip 400ms cubic-bezier(0.4,0,0.2,1) both;transform-style:preserve-3d; }
-@keyframes cardFlip { 0%{transform:rotateY(90deg) scale(.9);opacity:.3;} 60%{transform:rotateY(-8deg) scale(1.04);opacity:1;} 100%{transform:rotateY(0) scale(1);opacity:1;} }
+.card-flip { animation:cardFlip 520ms cubic-bezier(0.34,1.25,0.64,1) both;transform-style:preserve-3d; }
+@keyframes cardFlip {
+  0%   { transform:rotateY(92deg) scale(.88); opacity:.0; filter:brightness(.6); }
+  15%  { opacity:.5; }
+  55%  { transform:rotateY(-10deg) scale(1.04); opacity:1; filter:brightness(1.12); }
+  78%  { transform:rotateY(3deg) scale(1.01); filter:brightness(1.02); }
+  100% { transform:rotateY(0deg) scale(1); opacity:1; filter:brightness(1); }
+}
 
-.bj-glow { animation:bjGlow 700ms ease-out both; }
-@keyframes bjGlow { 0%{filter:drop-shadow(0 0 0 rgba(52,211,153,0));} 35%{filter:drop-shadow(0 0 10px rgba(52,211,153,.8));} 100%{filter:drop-shadow(0 0 3px rgba(52,211,153,.2));} }
+.bj-glow { animation:bjGlow 900ms cubic-bezier(0.22,1,0.36,1) both; }
+@keyframes bjGlow {
+  0%   { filter:drop-shadow(0 0 0 rgba(52,211,153,0)); transform:scale(1); }
+  30%  { filter:drop-shadow(0 0 14px rgba(52,211,153,.9)) drop-shadow(0 0 4px rgba(255,255,255,.4)); transform:scale(1.03); }
+  60%  { filter:drop-shadow(0 0 8px rgba(52,211,153,.5)); transform:scale(1.01); }
+  100% { filter:drop-shadow(0 0 4px rgba(52,211,153,.22)); transform:scale(1); }
+}
 
-.bust-shake { animation:bustShake 400ms cubic-bezier(0.36,0.07,0.19,0.97) both; }
-@keyframes bustShake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-5px)} 40%{transform:translateX(4px)} 60%{transform:translateX(-3px)} 80%{transform:translateX(2px)} }
+.bust-shake { animation:bustShake 480ms cubic-bezier(0.36,0.07,0.19,0.97) both; }
+@keyframes bustShake {
+  0%   { transform:translateX(0) rotate(0deg); }
+  15%  { transform:translateX(-6px) rotate(-.8deg); }
+  30%  { transform:translateX(5px) rotate(.6deg); }
+  45%  { transform:translateX(-4px) rotate(-.4deg); }
+  60%  { transform:translateX(3px) rotate(.2deg); }
+  80%  { transform:translateX(-1px) rotate(0deg); }
+  100% { transform:translateX(0) rotate(0deg); }
+}
 
 .chip-drop { animation:chipDrop 350ms cubic-bezier(0.34,1.56,0.64,1) both; }
 @keyframes chipDrop { 0%{transform:translateY(-12px) scale(.86);filter:brightness(1.7);} 60%{transform:translateY(2px) scale(1.03);} 100%{transform:translateY(0) scale(1);filter:brightness(1);} }
@@ -1741,6 +2044,267 @@ em { font-style:normal; font-size:9px; margin-left:5px; }
   cursor: not-allowed !important;
   pointer-events: none !important;
   filter: grayscale(0.4);
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   PREMIUM ATMOSPHERE LAYER
+   Subtle depth, cinematic lighting, table immersion.
+   All effects use CSS-only — no canvas, no heavy blur.
+════════════════════════════════════════════════════════════════ */
+
+/* 1. Richer felt gradient — warmer center, cooler edges */
+/* (overrides the existing flat radial) */
+
+/* 2. Edge vignette — merged into existing felt::before below */
+
+/* 3. Soft warm overhead light from top-center (like a casino spotlight) */
+.felt-inner::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(
+    ellipse 65% 45% at 50% 0%,
+    rgba(180,230,180,0.07) 0%,
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 4. Center ambient glow — fills empty middle space with warmth */
+.felt-inner {
+  background:
+    radial-gradient(ellipse 70% 50% at 50% 52%,
+      rgba(18,90,45,0.45) 0%,
+      transparent 65%),
+    radial-gradient(ellipse 160% 110% at 50% -5%,
+      #14602e 0%, #0b3d1c 28%, #062010 58%, #020c05 100%);
+}
+
+/* 5. Subtle decorative arc — the classic baccarat/blackjack table curve.
+      Pure CSS gradient arc positioned at 55% height */
+.felt-inner::after {
+  content: '';
+  position: absolute; inset: 0; z-index: 2;
+  opacity: 0.065;
+  background-image:
+    /* Noise texture */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='250' height='250'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.7' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='250' height='250' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 250px;
+}
+
+/* 6. Gold border ring (keeps existing but enhanced) */
+.felt::after {
+  content: '';
+  position: absolute; bottom: -55px; left: -12%; right: -12%;
+  height: 110px;
+  background: linear-gradient(to bottom, #2c1a09, #190f05);
+  border-radius: 50% 50% 0 0 / 75px 75px 0 0;
+  box-shadow: 0 -3px 14px rgba(0,0,0,.55);
+  z-index: 4;
+}
+
+/* 7. Premium table guide elements — SVG-drawn directly in CSS */
+/* Decorative separator line in center (like real casino table divisions) */
+.table-watermark::before {
+  content: '';
+  position: absolute;
+  left: 10%; right: 10%;
+  top: 42%; height: 1px;
+  background: linear-gradient(to right,
+    transparent 0%,
+    rgba(180,150,60,0.12) 20%,
+    rgba(180,150,60,0.22) 50%,
+    rgba(180,150,60,0.12) 80%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+.table-watermark::after {
+  content: '';
+  position: absolute;
+  left: 10%; right: 10%;
+  top: 58%; height: 1px;
+  background: linear-gradient(to right,
+    transparent 0%,
+    rgba(180,150,60,0.08) 20%,
+    rgba(180,150,60,0.16) 50%,
+    rgba(180,150,60,0.08) 80%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   BLACKJACK — EXTRA ATMOSPHERIC DEPTH
+════════════════════════════════════════════════════════════════ */
+
+/* Ambient glow around active hand — fills dead space */
+.player-area::before {
+  content: '';
+  position: absolute;
+  inset: -30px;
+  background: radial-gradient(ellipse 100% 80% at 50% 50%,
+    rgba(6,78,59,0.12) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: -1;
+}
+.dealer-area::before {
+  content: '';
+  position: absolute;
+  inset: -30px;
+  background: radial-gradient(ellipse 100% 80% at 50% 50%,
+    rgba(6,50,40,0.1) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Score pill — subtle premium glow when score is present */
+.score-pill {
+  box-shadow: 0 2px 8px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.04);
+  text-shadow: 0 1px 4px rgba(0,0,0,.5);
+}
+
+/* Card shadows more dramatic on felt */
+.crd {
+  box-shadow: 0 8px 24px rgba(0,0,0,.65), 0 2px 4px rgba(0,0,0,.4), 0 0 0 0.5px rgba(0,0,0,.2) !important;
+}
+
+/* Active main spot breathes gently */
+.main-spot:not(:has(.chip-tower)) {
+  animation: mainSpotBreath 3.5s ease-in-out infinite;
+}
+@keyframes mainSpotBreath {
+  0%,100% { filter: brightness(1); }
+  50%      { filter: brightness(1.08); }
+}
+
+/* Bet spot hover — micro lift */
+.spot:hover {
+  filter: brightness(1.2) !important;
+  transform: scale(1.07) !important;
+}
+
+/* Status pill — elevated */
+.status-pill {
+  box-shadow: 0 4px 20px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.06) !important;
+}
+
+/* Result overlay — integrated depth */
+.result-overlay {
+  box-shadow: 0 8px 40px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.05) !important;
+}
+
+
+/* ── Premium Card Extras ─────────────────────────────────────────────────── */
+
+/* Dealer cards slightly overlap naturally */
+.cards-fan .card-ol { margin-left: -20px; }
+
+/* Win state: subtle green tint on winning hand's cards */
+.bj-glow .crd { box-shadow: 0 10px 30px rgba(0,0,0,.55),0 0 16px rgba(52,211,153,.25),0 1px 0 rgba(255,255,255,.9) inset !important; }
+
+/* Bust state: cards darken elegantly */
+.bust-shake .crd { opacity:.62; filter:saturate(.5) brightness(.85); }
+
+/* Card hover in dealer area — subtle lift */
+.dealer-area .crd { cursor:default; transition:transform .2s ease; }
+
+/* Score pill — feels stamped on the table */
+.score-pill {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.01em;
+}
+
+
+/* ════════════════════════════════════════════════════════════
+   BLACKJACK DEALER PERSONALITY — Status Pill Tiers
+════════════════════════════════════════════════════════════ */
+
+/* Base pill — cleaner, heavier */
+.status-pill {
+  display: inline-block;
+  background: rgba(0,0,0,.78);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 999px;
+  padding: 7px 22px;
+  font-size: 13px; font-weight: 700; letter-spacing: .04em;
+  color: rgba(255,255,255,.85);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 20px rgba(0,0,0,.5);
+  animation: spIn .28s cubic-bezier(0.22,1,0.36,1) both;
+}
+@keyframes spIn {
+  from { opacity:0; transform:translateY(-6px) scale(.95); }
+  to   { opacity:1; transform:translateY(0) scale(1); }
+}
+
+/* Blackjack */
+.sp-bj {
+  background: linear-gradient(135deg, rgba(80,50,0,.85), rgba(50,30,0,.85));
+  border-color: rgba(251,191,36,.45);
+  color: #fbbf24;
+  text-shadow: 0 0 18px rgba(251,191,36,.6);
+  box-shadow: 0 4px 20px rgba(0,0,0,.5), 0 0 30px rgba(251,191,36,.2);
+  animation: spBJ .55s cubic-bezier(0.22,1,0.36,1) both;
+}
+@keyframes spBJ {
+  0%   { opacity:0; transform:scale(.8) translateY(-8px); letter-spacing:.12em; filter:brightness(.5); }
+  45%  { filter:brightness(1.5); }
+  100% { opacity:1; transform:scale(1) translateY(0); letter-spacing:.04em; filter:brightness(1); }
+}
+
+/* Dealer bust */
+.sp-bust {
+  background: rgba(60,8,8,.8);
+  border-color: rgba(239,68,68,.4);
+  color: #fca5a5;
+  text-shadow: 0 0 12px rgba(239,68,68,.5);
+  box-shadow: 0 4px 20px rgba(0,0,0,.5), 0 0 22px rgba(220,38,38,.15);
+  animation: spBust .45s cubic-bezier(0.22,1,0.36,1) both;
+}
+@keyframes spBust {
+  0%   { opacity:0; transform:scale(1.08) translateY(-4px); }
+  100% { opacity:1; transform:scale(1) translateY(0); }
+}
+
+/* Win */
+.sp-win {
+  background: rgba(5,40,22,.8);
+  border-color: rgba(52,211,153,.35);
+  color: #6ee7b7;
+  box-shadow: 0 4px 20px rgba(0,0,0,.5), 0 0 18px rgba(52,211,153,.12);
+}
+
+/* Push */
+.sp-push {
+  background: rgba(20,25,40,.8);
+  border-color: rgba(148,163,184,.2);
+  color: rgba(148,163,184,.8);
+}
+
+/* Loss */
+.sp-lose {
+  background: rgba(30,8,8,.75);
+  border-color: rgba(239,68,68,.2);
+  color: #fca5a5;
+}
+
+/* ── Dealer score pill — bigger, more dramatic ──────────────── */
+.score-pill {
+  min-width: 38px;
+  padding: 4px 12px;
+  font-size: 14px; font-weight: 900;
+  letter-spacing: -.01em;
+  text-shadow: 0 1px 4px rgba(0,0,0,.5);
+  transition: background .25s, border-color .25s, box-shadow .25s;
+}
+/* Dealer near bust — subtle tension */
+.dealer-area .score-pill[data-score="20"],
+.dealer-area .score-pill[data-score="19"],
+.dealer-area .score-pill[data-score="18"] {
+  border-color: rgba(52,211,153,.3);
+  box-shadow: 0 0 10px rgba(52,211,153,.12);
 }
 
 </style>

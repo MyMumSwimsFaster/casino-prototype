@@ -13,6 +13,31 @@
 	let wr     = $derived(winRate(stats));
 	let broke  = $derived(bankroll <= 0);
 
+	// Animated counter values
+	let animBankroll  = $state(0);
+	let animProfit    = $state(0);
+	let animHands     = $state(0);
+	let animWins      = $state(0);
+	let animLosses    = $state(0);
+	let animWR        = $state(0);
+	let animBestWin   = $state(0);
+	let mounted       = $state(false);
+	let cardsVisible  = $state(false);
+
+	function countUp(target: number, setter: (v: number) => void, duration = 900) {
+		const steps = 30;
+		const step  = target / steps;
+		const delay = duration / steps;
+		let i = 0;
+		const tick = () => {
+			i++;
+			if (i >= steps) { setter(target); return; }
+			setter(Math.round(step * i * 100) / 100);
+			setTimeout(tick, delay);
+		};
+		setTimeout(tick, delay);
+	}
+
 	function loadFromStorage() {
 		bankroll = getBankroll();
 		stats    = getStats();
@@ -20,12 +45,26 @@
 
 	onMount(() => {
 		loadFromStorage();
-		// Wenn der Tab wieder sichtbar wird (Rückkehr von Spielseite):
-		// Stats und Bankroll aus localStorage neu laden → live aktualisiert
-		const onVisible = () => { if (document.visibilityState === 'visible') loadFromStorage(); };
+		const onVisible = () => { if (document.visibilityState === 'visible') { loadFromStorage(); runCountUp(); } };
 		document.addEventListener('visibilitychange', onVisible);
+
+		// Stagger entrance animations
+		setTimeout(() => { mounted = true; }, 80);
+		setTimeout(() => { cardsVisible = true; }, 400);
+		setTimeout(() => runCountUp(), 600);
+
 		return () => document.removeEventListener('visibilitychange', onVisible);
 	});
+
+	function runCountUp() {
+		countUp(bankroll, v => animBankroll = v, 1100);
+		countUp(profit, v => animProfit = v, 900);
+		countUp(stats.handsPlayed, v => animHands = Math.round(v), 700);
+		countUp(stats.wins, v => animWins = Math.round(v), 750);
+		countUp(stats.losses, v => animLosses = Math.round(v), 750);
+		countUp(wr, v => animWR = v, 800);
+		countUp(stats.biggestWin, v => animBestWin = v, 900);
+	}
 
 	function handleReset() {
 		const also = confirm(
@@ -34,258 +73,714 @@
 		resetBankroll();
 		bankroll = 1000;
 		if (also) { resetStats(1000); stats = getStats(); }
+		setTimeout(() => runCountUp(), 100);
 	}
 
 	type ModalGame = 'blackjack' | 'baccarat' | null;
 	let openModal = $state<ModalGame>(null);
-
 	function open(game: ModalGame) { openModal = game; }
 	function close() { openModal = null; }
-	function handleBackdrop(e: MouseEvent) {
-		if ((e.target as HTMLElement).dataset.backdrop) close();
-	}
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') close();
-	}
+	function handleBackdrop(e: MouseEvent) { if ((e.target as HTMLElement).dataset.backdrop) close(); }
+	function handleKeydown(e: KeyboardEvent) { if (e.key === 'Escape') close(); }
+
+	// Last played game (localStorage)
+	let lastPlayed = $state<'blackjack' | 'baccarat' | null>(null);
+	onMount(() => {
+		const lp = localStorage.getItem('lastPlayed') as 'blackjack' | 'baccarat' | null;
+		if (lp) lastPlayed = lp;
+	});
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
-<main class="min-h-screen bg-slate-950 px-6 py-12 text-white">
-	<div class="mx-auto max-w-xl">
+<div class="lobby-root">
 
-		<!-- ── Titel ─────────────────────────────────────────────────────── -->
-		<div class="text-center">
-			<h1 class="text-6xl font-bold tracking-tight">🎰 Casino</h1>
-			<p class="mt-4 text-lg text-slate-400">Wähle ein Spiel und starte deine Runde.</p>
-		</div>
+	<!-- ── Atmospheric Background ──────────────────────────────── -->
+	<div class="bg-layer" aria-hidden="true">
+		<div class="bg-radial-1"></div>
+		<div class="bg-radial-2"></div>
+		<div class="bg-radial-3"></div>
+		<div class="bg-noise"></div>
+		<!-- Floating card suits -->
+		<div class="float-suit fs-1">♠</div>
+		<div class="float-suit fs-2">♥</div>
+		<div class="float-suit fs-3">♦</div>
+		<div class="float-suit fs-4">♣</div>
+		<div class="float-suit fs-5">♠</div>
+		<div class="float-suit fs-6">♦</div>
+		<!-- Light streak -->
+		<div class="light-streak ls-1"></div>
+		<div class="light-streak ls-2"></div>
+	</div>
 
-		<!-- ── Session Stats Dashboard ───────────────────────────────────── -->
-		<div class="mt-10 rounded-2xl border border-slate-800 bg-slate-900/80 p-5">
-			<div class="mb-4 flex items-center justify-between">
-				<h2 class="text-xs font-semibold tracking-widest text-slate-500 uppercase">Session Stats</h2>
-				<button
-					onclick={handleReset}
-					class="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-500 transition hover:border-slate-500 hover:text-slate-300"
-				>
-					↺ Reset
-				</button>
+	<!-- ── Page content ────────────────────────────────────────── -->
+	<div class="lobby-content {mounted ? 'content-in' : ''}">
+
+		<!-- HERO ─────────────────────────────────────────────── -->
+		<header class="hero">
+			<div class="hero-badge">PREMIUM CASINO</div>
+			<h1 class="hero-title">
+				<span class="hero-suit">♠</span>
+				<span class="hero-name">ROYAL TABLE</span>
+				<span class="hero-suit hero-suit-r">♥</span>
+			</h1>
+			<p class="hero-sub">Tonight, the cards decide.</p>
+			<!-- Decorative divider -->
+			<div class="hero-divider">
+				<span class="hd-line"></span>
+				<span class="hd-diamond">◆</span>
+				<span class="hd-line"></span>
 			</div>
+		</header>
 
-			<!-- Bankroll + P&L: grosse obere Zeile -->
-			<div class="mb-4 grid grid-cols-2 gap-3">
-				<div class="rounded-xl bg-slate-800/60 px-4 py-3">
-					<p class="text-xs text-slate-500 uppercase tracking-wide">Bankroll</p>
-					<p class="mt-1 text-2xl font-bold {bankroll <= 0 ? 'text-red-400' : bankroll < 100 ? 'text-amber-400' : 'text-emerald-400'}">
-						{bankroll.toFixed(2)} <span class="text-sm font-normal text-slate-400">CHF</span>
-					</p>
+		<!-- BANKROLL ─────────────────────────────────────────── -->
+		<section class="bankroll-section {mounted ? 'section-in' : ''}" style="animation-delay:.15s">
+			<div class="bankroll-card {broke ? 'bankroll-broke' : profit > 0 ? 'bankroll-up' : profit < 0 ? 'bankroll-down' : ''}">
+				<div class="bankroll-top">
+					<span class="bankroll-label">BALANCE</span>
+					<button onclick={handleReset} class="reset-btn" title="Reset">↺</button>
 				</div>
-				<div class="rounded-xl bg-slate-800/60 px-4 py-3">
-					<p class="text-xs text-slate-500 uppercase tracking-wide">Session P&L</p>
-					<p class="mt-1 text-2xl font-bold {profit > 0 ? 'text-emerald-400' : profit < 0 ? 'text-red-400' : 'text-slate-400'}">
-						{profit > 0 ? '+' : ''}{profit.toFixed(2)} <span class="text-sm font-normal text-slate-400">CHF</span>
-					</p>
+				<div class="bankroll-amount">
+					<span class="ba-number {broke ? 'ba-broke' : bankroll < 100 ? 'ba-warn' : 'ba-good'}">
+						{animBankroll.toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+					</span>
+					<span class="ba-currency">CHF</span>
+				</div>
+				<div class="bankroll-pnl {profit > 0 ? 'pnl-pos' : profit < 0 ? 'pnl-neg' : 'pnl-zero'}">
+					Session: {animProfit > 0 ? '+' : ''}{animProfit.toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} CHF
+				</div>
+				{#if broke}
+					<div class="bankroll-broke-msg">💸 No funds remaining</div>
+				{/if}
+			</div>
+		</section>
+
+		<!-- SESSION STATS ───────────────────────────────────── -->
+		<section class="stats-section {mounted ? 'section-in' : ''}" style="animation-delay:.25s">
+			<h2 class="section-label">SESSION STATS</h2>
+			<div class="stats-grid">
+				<div class="stat-cell">
+					<span class="stat-val">{animHands}</span>
+					<span class="stat-key">Hands</span>
+				</div>
+				<div class="stat-cell">
+					<span class="stat-val stat-win">{animWins}</span>
+					<span class="stat-key">Wins</span>
+				</div>
+				<div class="stat-cell">
+					<span class="stat-val stat-loss">{animLosses}</span>
+					<span class="stat-key">Losses</span>
+				</div>
+				<div class="stat-cell">
+					<span class="stat-val {animWR >= 50 ? 'stat-win' : animWR > 0 ? 'stat-warn' : ''}">
+						{stats.handsPlayed > 0 ? animWR.toFixed(1) + '%' : '—'}
+					</span>
+					<span class="stat-key">Win Rate</span>
+				</div>
+				<div class="stat-cell stat-wide">
+					<span class="stat-val {animBestWin > 0 ? 'stat-win' : ''}">
+						{animBestWin > 0 ? '+' + animBestWin.toFixed(0) : '—'}
+					</span>
+					<span class="stat-key">Best Win</span>
 				</div>
 			</div>
+		</section>
 
-			<!-- 6 kleinere Stat-Karten -->
-			<div class="grid grid-cols-3 gap-2">
-				<div class="rounded-xl bg-slate-800/40 px-3 py-2.5 text-center">
-					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Hands</p>
-					<p class="mt-0.5 text-xl font-bold text-white">{stats.handsPlayed}</p>
-				</div>
-				<div class="rounded-xl bg-slate-800/40 px-3 py-2.5 text-center">
-					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Wins</p>
-					<p class="mt-0.5 text-xl font-bold {stats.wins > 0 ? 'text-emerald-400' : 'text-slate-400'}">{stats.wins}</p>
-				</div>
-				<div class="rounded-xl bg-slate-800/40 px-3 py-2.5 text-center">
-					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Losses</p>
-					<p class="mt-0.5 text-xl font-bold {stats.losses > 0 ? 'text-red-400' : 'text-slate-400'}">{stats.losses}</p>
-				</div>
-				<div class="rounded-xl bg-slate-800/40 px-3 py-2.5 text-center">
-					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Pushes</p>
-					<p class="mt-0.5 text-xl font-bold text-amber-400">{stats.pushes}</p>
-				</div>
-				<div class="rounded-xl bg-slate-800/40 px-3 py-2.5 text-center">
-					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Win Rate</p>
-					<p class="mt-0.5 text-xl font-bold {wr >= 50 ? 'text-emerald-400' : wr > 0 ? 'text-amber-400' : 'text-slate-400'}">
-						{stats.handsPlayed > 0 ? wr.toFixed(1) + '%' : '—'}
-					</p>
-				</div>
-				<div class="rounded-xl bg-slate-800/40 px-3 py-2.5 text-center">
-					<p class="text-[10px] text-slate-500 uppercase tracking-wide">Best Win</p>
-					<p class="mt-0.5 text-xl font-bold {stats.biggestWin > 0 ? 'text-emerald-400' : 'text-slate-400'}">
-						{stats.biggestWin > 0 ? '+' + stats.biggestWin.toFixed(0) : '—'}
-					</p>
-				</div>
-			</div>
-		</div>
-
-		<!-- ── Hinweis bei 0 Guthaben ────────────────────────────────────── -->
-		{#if broke}
-			<div class="mt-6 rounded-2xl border border-red-900/50 bg-red-950/30 px-5 py-4 text-sm text-red-400 text-center">
-				💸 Kein Guthaben mehr. Setze dein Guthaben zurück oder schau dir deine History an.
-			</div>
+		<!-- LAST PLAYED ─────────────────────────────────────── -->
+		{#if lastPlayed}
+			<section class="last-section {mounted ? 'section-in' : ''}" style="animation-delay:.3s">
+				<a href="/{lastPlayed}" class="last-card" onclick={() => localStorage.setItem('lastPlayed', lastPlayed!)}>
+					<span class="last-badge">🔥 LAST PLAYED</span>
+					<span class="last-name">{lastPlayed === 'blackjack' ? '♠ BLACKJACK' : '♦ BACCARAT'}</span>
+					<span class="last-cta">Continue →</span>
+				</a>
+			</section>
 		{/if}
 
-		<!-- ── Spielbuttons ──────────────────────────────────────────────── -->
-		<div class="mt-6 flex flex-col gap-6">
+		<!-- GAME TILES ──────────────────────────────────────── -->
+		<section class="games-section {cardsVisible ? 'games-in' : ''}" style="animation-delay:.38s">
+			<h2 class="section-label">CHOOSE YOUR GAME</h2>
+			<div class="games-grid">
 
-			<!-- Blackjack: bei 0 CHF führt der Link zur Spielseite → dort erscheint das Modal -->
-			<div class="flex flex-col gap-2">
-				<a
-					href="/blackjack"
-					class="rounded-2xl px-8 py-5 text-xl font-semibold text-center transition active:scale-95
-					{broke
-						? 'bg-slate-800 text-slate-600 border border-slate-700 cursor-default'
-						: 'bg-emerald-600 hover:bg-emerald-500'}"
-				>
-					🃏 Blackjack starten
-				</a>
-				<button onclick={() => open('blackjack')} class="text-sm text-slate-500 hover:text-slate-300 transition">
-					Blackjack Regeln
-				</button>
+				<!-- BLACKJACK -->
+				<div class="game-tile bj-tile {broke ? 'tile-broke' : ''}">
+					<div class="tile-glow bj-glow"></div>
+					<div class="tile-inner">
+						<div class="tile-suit-bg">♠</div>
+						<div class="tile-header">
+							<span class="tile-suit">♠</span>
+							<span class="tile-badge bj-badge">3:2</span>
+						</div>
+						<h3 class="tile-name">BLACKJACK</h3>
+						<p class="tile-desc">Beat the dealer.<br>21 is the magic number.</p>
+						<div class="tile-meta">
+							<span class="tm-item">6 Deck Shoe</span>
+							<span class="tm-dot">·</span>
+							<span class="tm-item">Sidebets</span>
+						</div>
+						<div class="tile-actions">
+							<a href="/blackjack"
+								onclick={() => localStorage.setItem('lastPlayed','blackjack')}
+								class="tile-play {broke ? 'tile-play-broke' : 'bj-play'}">
+								{broke ? 'No Funds' : 'PLAY NOW →'}
+							</a>
+							<button onclick={() => open('blackjack')} class="tile-rules">Rules</button>
+						</div>
+					</div>
+				</div>
+
+				<!-- BACCARAT -->
+				<div class="game-tile bac-tile {broke ? 'tile-broke' : ''}">
+					<div class="tile-glow bac-glow"></div>
+					<div class="tile-inner">
+						<div class="tile-suit-bg">♦</div>
+						<div class="tile-header">
+							<span class="tile-suit bac-suit">♦</span>
+							<span class="tile-badge bac-badge">8:1 TIE</span>
+						</div>
+						<h3 class="tile-name">BACCARAT</h3>
+						<p class="tile-desc">Player vs Banker.<br>The classic casino duel.</p>
+						<div class="tile-meta">
+							<span class="tm-item">Punto Banco</span>
+							<span class="tm-dot">·</span>
+							<span class="tm-item">Auto Reveal</span>
+						</div>
+						<div class="tile-actions">
+							<a href="/baccarat"
+								onclick={() => localStorage.setItem('lastPlayed','baccarat')}
+								class="tile-play {broke ? 'tile-play-broke' : 'bac-play'}">
+								{broke ? 'No Funds' : 'PLAY NOW →'}
+							</a>
+							<button onclick={() => open('baccarat')} class="tile-rules">Rules</button>
+						</div>
+					</div>
+				</div>
+
 			</div>
+		</section>
 
-			<!-- Baccarat: gleiche Logik -->
-			<div class="flex flex-col gap-2">
-				<a
-					href="/baccarat"
-					class="rounded-2xl px-8 py-5 text-xl font-semibold text-center transition active:scale-95
-					{broke
-						? 'bg-slate-800 text-slate-600 border border-slate-700 cursor-default'
-						: 'bg-emerald-700 hover:bg-emerald-600'}"
-				>
-					🎴 Baccarat starten
-				</a>
-				<button onclick={() => open('baccarat')} class="text-sm text-slate-500 hover:text-slate-300 transition">
-					Baccarat Regeln
-				</button>
-			</div>
-
-			<!-- History: immer anklickbar -->
-			<a
-				href="/history"
-				class="rounded-2xl border border-slate-700 bg-slate-900 px-8 py-5 text-xl font-semibold text-center transition hover:bg-slate-800 active:scale-95"
-			>
-				📜 History
+		<!-- HISTORY ─────────────────────────────────────────── -->
+		<section class="history-section {mounted ? 'section-in' : ''}" style="animation-delay:.45s">
+			<a href="/history" class="history-link">
+				<span class="hl-icon">📜</span>
+				<span class="hl-text">Round History</span>
+				<span class="hl-arrow">→</span>
 			</a>
+		</section>
 
-		</div>
+		<!-- Footer motto -->
+		<footer class="lobby-footer">
+			<span>The house always wins — but tonight might be different.</span>
+		</footer>
+
 	</div>
-</main>
+</div>
 
-<!-- ══ MODAL OVERLAY ════════════════════════════════════════════════════════ -->
+<!-- ══ RULES MODAL ═════════════════════════════════════════════ -->
 {#if openModal !== null}
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-	<div
-		data-backdrop="true"
-		onclick={handleBackdrop}
-		class="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4 py-8 backdrop-blur-sm"
-	>
-		<div class="relative z-50 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-8 shadow-2xl">
-			<button onclick={close}
-				class="absolute top-4 right-4 rounded-lg p-1.5 text-slate-500 hover:bg-slate-800 hover:text-white transition"
-				aria-label="Schliessen">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-					<path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
-				</svg>
-			</button>
+	<div data-backdrop="true" onclick={handleBackdrop}
+		class="modal-backdrop">
+		<div class="modal-card">
+			<button onclick={close} class="modal-close" aria-label="Close">✕</button>
 
 			{#if openModal === 'blackjack'}
-				<div class="pr-4">
-					<div class="flex items-center gap-3 mb-6"><span class="text-3xl">🃏</span><h2 class="text-2xl font-bold">Blackjack Regeln</h2></div>
-					<section class="mb-6">
-						<h3 class="text-xs font-semibold tracking-widest text-emerald-400 uppercase mb-2">Ziel</h3>
-						<p class="text-slate-300 text-sm leading-relaxed">Komme mit deinen Karten möglichst nah an <strong class="text-white">21</strong>, ohne zu überschreiten — und schlage dabei den Dealer.</p>
+				<div class="modal-body">
+					<div class="modal-header">
+						<span class="modal-icon">♠</span>
+						<h2>Blackjack Rules</h2>
+					</div>
+					<section class="rule-section">
+						<h3 class="rule-heading bj-heading">OBJECTIVE</h3>
+						<p class="rule-text">Get as close to <strong>21</strong> as possible without going over — and beat the dealer.</p>
 					</section>
-					<section class="mb-6">
-						<h3 class="text-xs font-semibold tracking-widest text-emerald-400 uppercase mb-3">Kartenwerte</h3>
-						<div class="grid grid-cols-3 gap-2">
-							<div class="rounded-xl border border-slate-700 bg-slate-800 p-3 text-center"><p class="text-lg font-bold text-white">2 – 10</p><p class="text-xs text-slate-400 mt-1">Nennwert</p></div>
-							<div class="rounded-xl border border-slate-700 bg-slate-800 p-3 text-center"><p class="text-lg font-bold text-white">J · Q · K</p><p class="text-xs text-slate-400 mt-1">= 10</p></div>
-							<div class="rounded-xl border border-slate-700 bg-slate-800 p-3 text-center"><p class="text-lg font-bold text-white">A</p><p class="text-xs text-slate-400 mt-1">= 1 oder 11</p></div>
+					<section class="rule-section">
+						<h3 class="rule-heading bj-heading">CARD VALUES</h3>
+						<div class="value-grid">
+							<div class="value-cell"><p class="vc-val">2–10</p><p class="vc-key">Face value</p></div>
+							<div class="value-cell"><p class="vc-val">J·Q·K</p><p class="vc-key">= 10</p></div>
+							<div class="value-cell"><p class="vc-val">A</p><p class="vc-key">= 1 or 11</p></div>
 						</div>
 					</section>
-					<section class="mb-6">
-						<h3 class="text-xs font-semibold tracking-widest text-emerald-400 uppercase mb-3">Aktionen</h3>
-						<div class="flex flex-col gap-2">
-							<div class="flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3"><span class="mt-0.5 rounded-lg bg-emerald-700 px-2 py-0.5 text-xs font-bold text-white shrink-0">Hit</span><p class="text-sm text-slate-300">Ziehe eine weitere Karte.</p></div>
-							<div class="flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3"><span class="mt-0.5 rounded-lg bg-slate-600 px-2 py-0.5 text-xs font-bold text-white shrink-0">Stand</span><p class="text-sm text-slate-300">Beende deinen Zug — der Dealer spielt.</p></div>
-							<div class="flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3"><span class="mt-0.5 rounded-lg bg-amber-600 px-2 py-0.5 text-xs font-bold text-white shrink-0">Double</span><p class="text-sm text-slate-300">Verdopple deinen Einsatz, erhalte genau eine weitere Karte.</p></div>
-							<div class="flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3"><span class="mt-0.5 rounded-lg bg-violet-700 px-2 py-0.5 text-xs font-bold text-white shrink-0">Split</span><p class="text-sm text-slate-300">Teile zwei gleichwertige Karten in zwei separate Hände auf.</p></div>
+					<section class="rule-section">
+						<h3 class="rule-heading bj-heading">ACTIONS</h3>
+						<div class="action-list">
+							{#each [['Hit','Draw another card.','#16a34a'],['Stand','End your turn.','#4b5563'],['Double','Double bet, one more card.','#d97706'],['Split','Split equal cards into two hands.','#7c3aed']] as [name, desc, col]}
+								<div class="action-row">
+									<span class="act-badge" style="background:{col}">{name}</span>
+									<span class="act-desc">{desc}</span>
+								</div>
+							{/each}
 						</div>
 					</section>
-					<section class="mb-6">
-						<h3 class="text-xs font-semibold tracking-widest text-emerald-400 uppercase mb-3">Auszahlungen</h3>
-						<div class="flex flex-col gap-1 text-sm">
-							<div class="flex justify-between"><span class="text-slate-300">Blackjack</span><span class="font-bold text-emerald-400">3:2</span></div>
-							<div class="flex justify-between"><span class="text-slate-300">Win</span><span class="font-bold text-emerald-400">1:1</span></div>
-							<div class="flex justify-between"><span class="text-slate-300">Push</span><span class="font-bold text-amber-400">Einsatz zurück</span></div>
-							<div class="flex justify-between"><span class="text-slate-300">Lose / Bust</span><span class="font-bold text-red-400">Verloren</span></div>
+					<section class="rule-section">
+						<h3 class="rule-heading bj-heading">PAYOUTS</h3>
+						<div class="payout-list">
+							<div class="payout-row"><span>Blackjack</span><span class="pay-val pay-gold">3:2</span></div>
+							<div class="payout-row"><span>Win</span><span class="pay-val pay-green">1:1</span></div>
+							<div class="payout-row"><span>Push</span><span class="pay-val pay-amber">Bet returned</span></div>
+							<div class="payout-row"><span>Bust / Lose</span><span class="pay-val pay-red">Lost</span></div>
 						</div>
 					</section>
-					<section>
-						<h3 class="text-xs font-semibold tracking-widest text-emerald-400 uppercase mb-3">Hausregeln</h3>
-						<ul class="flex flex-col gap-1.5">
-							{#each ['6-Deck Shoe','Dealer steht auf Soft 17 (z.B. A+6)','Double after Split erlaubt','Kein Surrender','Dealer prüft auf Blackjack (Peek)'] as rule}
-								<li class="flex items-center gap-2 text-sm text-slate-300"><span class="text-emerald-500">✓</span>{rule}</li>
+					<section class="rule-section">
+						<h3 class="rule-heading bj-heading">HOUSE RULES</h3>
+						<ul class="rule-list">
+							{#each ['6-Deck Shoe','Dealer stands on Soft 17','Double after Split allowed','No Surrender','Dealer peeks for Blackjack'] as r}
+								<li><span class="rule-check">✓</span>{r}</li>
 							{/each}
 						</ul>
 					</section>
 				</div>
 
 			{:else if openModal === 'baccarat'}
-				<div class="pr-4">
-					<div class="flex items-center gap-3 mb-6"><span class="text-3xl">🎴</span><h2 class="text-2xl font-bold">Baccarat Regeln</h2></div>
-					<section class="mb-6">
-						<h3 class="text-xs font-semibold tracking-widest text-violet-400 uppercase mb-2">Ziel</h3>
-						<p class="text-slate-300 text-sm leading-relaxed">Wette darauf, wessen Hand näher an <strong class="text-white">9</strong> liegt — Player, Banker oder Tie.</p>
+				<div class="modal-body">
+					<div class="modal-header">
+						<span class="modal-icon bac-modal-icon">♦</span>
+						<h2>Baccarat Rules</h2>
+					</div>
+					<section class="rule-section">
+						<h3 class="rule-heading bac-heading">OBJECTIVE</h3>
+						<p class="rule-text">Bet on which hand reaches <strong>9</strong> — Player, Banker, or Tie.</p>
 					</section>
-					<section class="mb-6">
-						<h3 class="text-xs font-semibold tracking-widest text-violet-400 uppercase mb-3">Kartenwerte</h3>
-						<div class="grid grid-cols-3 gap-2">
-							<div class="rounded-xl border border-slate-700 bg-slate-800 p-3 text-center"><p class="text-lg font-bold text-white">A</p><p class="text-xs text-slate-400 mt-1">= 1</p></div>
-							<div class="rounded-xl border border-slate-700 bg-slate-800 p-3 text-center"><p class="text-lg font-bold text-white">2 – 9</p><p class="text-xs text-slate-400 mt-1">Nennwert</p></div>
-							<div class="rounded-xl border border-slate-700 bg-slate-800 p-3 text-center"><p class="text-lg font-bold text-white">10 J Q K</p><p class="text-xs text-slate-400 mt-1">= 0</p></div>
+					<section class="rule-section">
+						<h3 class="rule-heading bac-heading">CARD VALUES</h3>
+						<div class="value-grid">
+							<div class="value-cell"><p class="vc-val">A</p><p class="vc-key">= 1</p></div>
+							<div class="value-cell"><p class="vc-val">2–9</p><p class="vc-key">Face value</p></div>
+							<div class="value-cell"><p class="vc-val">10·J·Q·K</p><p class="vc-key">= 0</p></div>
 						</div>
-						<p class="mt-3 text-xs text-slate-500 text-center">Handwert = Summe mod 10 · Beispiel: 7 + 6 = 13 → Wert <strong class="text-slate-300">3</strong></p>
+						<p class="rule-note">Hand value = sum mod 10 · Example: 7+6 = 13 → value <strong>3</strong></p>
 					</section>
-					<section class="mb-6">
-						<h3 class="text-xs font-semibold tracking-widest text-violet-400 uppercase mb-3">Auszahlungen</h3>
-						<div class="flex flex-col gap-1 text-sm">
-							<div class="flex justify-between"><span class="text-slate-300">Player Win</span><span class="font-bold text-emerald-400">1:1</span></div>
-							<div class="flex justify-between"><span class="text-slate-300">Banker Win</span><span class="font-bold text-emerald-400">0.95:1 (5% Kommission)</span></div>
-							<div class="flex justify-between"><span class="text-slate-300">Tie Win</span><span class="font-bold text-emerald-400">8:1</span></div>
-							<div class="flex justify-between"><span class="text-slate-300">Tie (P/B-Wette)</span><span class="font-bold text-amber-400">Push</span></div>
-						</div>
-					</section>
-					<section class="mb-6">
-						<h3 class="text-xs font-semibold tracking-widest text-violet-400 uppercase mb-2">Natural Hand</h3>
-						<div class="rounded-xl border border-amber-700/50 bg-amber-900/20 px-4 py-3">
-							<p class="text-sm text-amber-200">✨ Wenn Player oder Banker mit den ersten zwei Karten <strong>8 oder 9</strong> erreicht — keine weiteren Karten.</p>
+					<section class="rule-section">
+						<h3 class="rule-heading bac-heading">PAYOUTS</h3>
+						<div class="payout-list">
+							<div class="payout-row"><span>Player Win</span><span class="pay-val pay-green">1:1</span></div>
+							<div class="payout-row"><span>Banker Win</span><span class="pay-val pay-green">0.95:1</span></div>
+							<div class="payout-row"><span>Tie Win</span><span class="pay-val pay-gold">8:1</span></div>
+							<div class="payout-row"><span>Tie (P/B bet)</span><span class="pay-val pay-amber">Push</span></div>
 						</div>
 					</section>
-					<section>
-						<h3 class="text-xs font-semibold tracking-widest text-violet-400 uppercase mb-3">Ziehregeln (Punto Banco)</h3>
-						<p class="text-xs text-slate-500 mb-3">Laufen automatisch — du musst nur die Karten aufdecken.</p>
-						<div class="flex flex-col gap-2">
-							<div class="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3"><p class="text-xs font-semibold text-slate-300 uppercase tracking-wide mb-1">Player</p><p class="text-sm text-slate-400">Zieht bei Wert 0–5 · Steht bei 6–7</p></div>
-							<div class="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3"><p class="text-xs font-semibold text-slate-300 uppercase tracking-wide mb-1">Banker</p><p class="text-sm text-slate-400">Hängt vom eigenen Wert und der dritten Karte des Players ab — gemäss Punto-Banco-Tabelle.</p></div>
+					<section class="rule-section">
+						<h3 class="rule-heading bac-heading">NATURAL HAND</h3>
+						<div class="natural-box">✨ 8 or 9 on first two cards — round ends immediately.</div>
+					</section>
+					<section class="rule-section">
+						<h3 class="rule-heading bac-heading">DRAWING RULES (PUNTO BANCO)</h3>
+						<div class="draw-list">
+							<div class="draw-row"><span class="draw-side">Player</span><span>Draws on 0–5 · Stands on 6–7</span></div>
+							<div class="draw-row"><span class="draw-side">Banker</span><span>Depends on own total and Player's 3rd card per Punto Banco table.</span></div>
 						</div>
 					</section>
 				</div>
 			{/if}
 
-			<button onclick={close}
-				class="mt-8 w-full rounded-xl border border-slate-700 bg-slate-800 py-3 text-sm font-semibold text-slate-300 transition hover:bg-slate-700 active:scale-95">
-				Schliessen
-			</button>
+			<button onclick={close} class="modal-close-btn">Close</button>
 		</div>
 	</div>
 {/if}
 
 <style>
-	@keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
-	@keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+/* ════════════════════════════════════════════════════════════
+   ROOT
+════════════════════════════════════════════════════════════ */
+:global(body) { margin:0; padding:0; background:#05080d; }
+
+.lobby-root {
+	min-height: 100dvh;
+	background: #05080d;
+	color: #fff;
+	overflow-x: hidden;
+	position: relative;
+}
+
+/* ════════════════════════════════════════════════════════════
+   ATMOSPHERIC BACKGROUND
+════════════════════════════════════════════════════════════ */
+.bg-layer {
+	position: fixed; inset: 0;
+	pointer-events: none; z-index: 0;
+	overflow: hidden;
+}
+.bg-radial-1 {
+	position:absolute; top:-20%; left:-10%; width:70%; height:70%;
+	background: radial-gradient(ellipse, rgba(6,78,59,.22) 0%, transparent 65%);
+	animation: bgDrift1 18s ease-in-out infinite alternate;
+}
+.bg-radial-2 {
+	position:absolute; bottom:-15%; right:-10%; width:60%; height:60%;
+	background: radial-gradient(ellipse, rgba(120,50,10,.18) 0%, transparent 65%);
+	animation: bgDrift2 22s ease-in-out infinite alternate;
+}
+.bg-radial-3 {
+	position:absolute; top:30%; left:30%; width:50%; height:50%;
+	background: radial-gradient(ellipse, rgba(180,140,40,.06) 0%, transparent 60%);
+	animation: bgDrift1 28s ease-in-out infinite alternate-reverse;
+}
+@keyframes bgDrift1 { from{transform:translate(0,0);} to{transform:translate(5%,8%);} }
+@keyframes bgDrift2 { from{transform:translate(0,0);} to{transform:translate(-6%,-5%);} }
+
+.bg-noise {
+	position:absolute; inset:0;
+	opacity:.04;
+	background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='250' height='250'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.7' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='250' height='250' filter='url(%23n)'/%3E%3C/svg%3E");
+	background-size:250px;
+}
+
+/* Floating suits */
+.float-suit {
+	position:absolute; font-size:clamp(60px,10vw,120px); font-weight:900;
+	color:rgba(255,255,255,.025); pointer-events:none; user-select:none;
+	animation: floatUp linear infinite;
+}
+.fs-1 { left:5%;  bottom:-10%; animation-duration:25s; animation-delay:0s; font-size:80px; }
+.fs-2 { left:20%; bottom:-10%; animation-duration:32s; animation-delay:-8s; color:rgba(239,68,68,.03); }
+.fs-3 { left:45%; bottom:-10%; animation-duration:28s; animation-delay:-4s; color:rgba(180,140,40,.025); }
+.fs-4 { left:65%; bottom:-10%; animation-duration:22s; animation-delay:-12s; }
+.fs-5 { left:80%; bottom:-10%; animation-duration:35s; animation-delay:-18s; font-size:60px; }
+.fs-6 { left:92%; bottom:-10%; animation-duration:27s; animation-delay:-6s; color:rgba(180,140,40,.02); font-size:90px; }
+@keyframes floatUp {
+	0%   { transform: translateY(0) rotate(0deg); opacity:0; }
+	5%   { opacity:1; }
+	95%  { opacity:.8; }
+	100% { transform: translateY(-120vh) rotate(15deg); opacity:0; }
+}
+
+/* Light streaks */
+.light-streak {
+	position:absolute; width:1px; height:30vh;
+	background: linear-gradient(to bottom, transparent, rgba(180,150,50,.15), transparent);
+	animation: streakFall linear infinite;
+}
+.ls-1 { left:25%; top:-30%; animation-duration:8s; animation-delay:-3s; }
+.ls-2 { left:72%; top:-30%; animation-duration:12s; animation-delay:-7s; }
+@keyframes streakFall { to { transform: translateY(180vh); } }
+
+/* ════════════════════════════════════════════════════════════
+   CONTENT LAYOUT
+════════════════════════════════════════════════════════════ */
+.lobby-content {
+	position: relative; z-index: 1;
+	max-width: 460px; margin: 0 auto;
+	padding: 48px 20px 60px;
+	opacity: 0;
+	transition: opacity .5s ease;
+}
+.content-in { opacity: 1; }
+
+.section-in { animation: sectionIn .55s cubic-bezier(0.22,1,0.36,1) both; }
+@keyframes sectionIn {
+	from { opacity:0; transform:translateY(18px); }
+	to   { opacity:1; transform:translateY(0); }
+}
+
+/* ════════════════════════════════════════════════════════════
+   HERO
+════════════════════════════════════════════════════════════ */
+.hero { text-align:center; margin-bottom:32px; }
+
+.hero-badge {
+	display:inline-block;
+	font-size:9px; font-weight:800; letter-spacing:.35em;
+	color:rgba(180,150,40,.8); text-transform:uppercase;
+	border:1px solid rgba(180,150,40,.2); border-radius:999px;
+	padding:4px 14px; margin-bottom:16px;
+	animation: sectionIn .5s cubic-bezier(0.22,1,0.36,1) .1s both;
+}
+.hero-title {
+	display:flex; align-items:center; justify-content:center; gap:14px;
+	font-size:clamp(28px,8vw,42px); font-weight:900;
+	letter-spacing:.15em; margin:0 0 12px;
+	line-height:1;
+	animation: heroIn .7s cubic-bezier(0.22,1,0.36,1) .2s both;
+}
+@keyframes heroIn {
+	from { opacity:0; transform:scale(.92) translateY(10px); letter-spacing:.25em; }
+	to   { opacity:1; transform:scale(1) translateY(0); letter-spacing:.15em; }
+}
+.hero-suit {
+	font-size:.75em; color:rgba(255,255,255,.35);
+	animation: suitPulse 3s ease-in-out infinite;
+}
+.hero-suit-r { color:rgba(220,50,50,.35); animation-delay:1.5s; }
+@keyframes suitPulse { 0%,100%{opacity:.35;} 50%{opacity:.65;} }
+.hero-name {
+	background: linear-gradient(135deg, #fff 20%, rgba(180,150,40,1) 50%, #fff 80%);
+	-webkit-background-clip: text; -webkit-text-fill-color: transparent;
+	background-clip: text;
+	background-size: 200% 100%;
+	animation: heroShine 4s linear infinite;
+}
+@keyframes heroShine { from{background-position:100% 0;} to{background-position:-100% 0;} }
+
+.hero-sub {
+	font-size:13px; letter-spacing:.2em; color:rgba(255,255,255,.28);
+	text-transform:uppercase; margin:0 0 20px;
+	animation: sectionIn .5s cubic-bezier(0.22,1,0.36,1) .35s both;
+}
+
+.hero-divider {
+	display:flex; align-items:center; justify-content:center; gap:10px;
+	animation: sectionIn .5s cubic-bezier(0.22,1,0.36,1) .45s both;
+}
+.hd-line { flex:1; max-width:80px; height:1px; background:linear-gradient(to right,transparent,rgba(180,150,40,.3)); }
+.hd-line:last-child { background:linear-gradient(to left,transparent,rgba(180,150,40,.3)); }
+.hd-diamond { font-size:8px; color:rgba(180,150,40,.5); }
+
+/* ════════════════════════════════════════════════════════════
+   BANKROLL CARD
+════════════════════════════════════════════════════════════ */
+.bankroll-section { margin-bottom:16px; }
+
+.bankroll-card {
+	border-radius:20px; padding:18px 22px 14px;
+	background: rgba(8,14,20,.85);
+	border: 1px solid rgba(255,255,255,.07);
+	box-shadow: 0 8px 40px rgba(0,0,0,.5);
+	transition: border-color .3s, box-shadow .3s;
+	position:relative; overflow:hidden;
+}
+.bankroll-card::before {
+	content:''; position:absolute; top:0; left:0; right:0; height:1px;
+	background: linear-gradient(to right, transparent, rgba(180,150,40,.35), transparent);
+}
+.bankroll-up   { border-color:rgba(52,211,153,.15); box-shadow:0 8px 40px rgba(0,0,0,.5),0 0 30px rgba(52,211,153,.06); }
+.bankroll-down { border-color:rgba(239,68,68,.12); }
+.bankroll-broke{ border-color:rgba(239,68,68,.25); box-shadow:0 8px 40px rgba(0,0,0,.5),0 0 30px rgba(220,38,38,.08); }
+
+.bankroll-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+.bankroll-label { font-size:9px; font-weight:800; letter-spacing:.25em; color:rgba(180,150,40,.7); text-transform:uppercase; }
+.reset-btn {
+	font-size:13px; color:rgba(255,255,255,.2); background:rgba(255,255,255,.04);
+	border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:3px 10px;
+	cursor:pointer; transition:all .15s;
+}
+.reset-btn:hover { color:rgba(255,255,255,.55); border-color:rgba(255,255,255,.15); }
+
+.bankroll-amount { display:flex; align-items:baseline; gap:6px; margin-bottom:4px; }
+.ba-number { font-size:clamp(28px,7vw,36px); font-weight:900; letter-spacing:-.02em; font-variant-numeric:tabular-nums; transition:color .3s; }
+.ba-good { color:#34d399; text-shadow:0 0 20px rgba(52,211,153,.3); }
+.ba-warn { color:#fbbf24; }
+.ba-broke{ color:#f87171; }
+.ba-currency { font-size:14px; color:rgba(255,255,255,.3); font-weight:500; }
+
+.bankroll-pnl { font-size:11px; letter-spacing:.06em; }
+.pnl-pos  { color:rgba(52,211,153,.65); }
+.pnl-neg  { color:rgba(239,68,68,.65); }
+.pnl-zero { color:rgba(255,255,255,.2); }
+
+.bankroll-broke-msg { margin-top:8px; font-size:11px; color:#f87171; text-align:center; letter-spacing:.08em; }
+
+/* ════════════════════════════════════════════════════════════
+   STATS
+════════════════════════════════════════════════════════════ */
+.stats-section { margin-bottom:16px; }
+.section-label {
+	font-size:8px; font-weight:800; letter-spacing:.3em;
+	color:rgba(255,255,255,.2); text-transform:uppercase;
+	margin:0 0 10px; text-align:center;
+}
+.stats-grid {
+	display:grid; grid-template-columns:repeat(5,1fr); gap:6px;
+}
+.stat-cell {
+	background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.05);
+	border-radius:12px; padding:10px 6px; text-align:center;
+}
+.stat-wide { grid-column:span 1; }
+.stat-val {
+	display:block; font-size:clamp(15px,3vw,18px); font-weight:900;
+	color:rgba(255,255,255,.7); font-variant-numeric:tabular-nums;
+	line-height:1; margin-bottom:4px;
+}
+.stat-win  { color:#34d399; }
+.stat-loss { color:#f87171; }
+.stat-warn { color:#fbbf24; }
+.stat-key  { display:block; font-size:8px; color:rgba(255,255,255,.22); letter-spacing:.1em; text-transform:uppercase; }
+
+/* ════════════════════════════════════════════════════════════
+   LAST PLAYED
+════════════════════════════════════════════════════════════ */
+.last-section { margin-bottom:16px; }
+.last-card {
+	display:flex; align-items:center; gap:10px;
+	background:rgba(180,150,40,.06); border:1px solid rgba(180,150,40,.18);
+	border-radius:14px; padding:12px 16px; text-decoration:none; color:#fff;
+	transition:all .2s;
+}
+.last-card:hover { background:rgba(180,150,40,.1); border-color:rgba(180,150,40,.3); }
+.last-badge { font-size:9px; font-weight:800; letter-spacing:.15em; color:rgba(180,150,40,.8); white-space:nowrap; }
+.last-name  { flex:1; font-size:13px; font-weight:700; letter-spacing:.08em; text-align:center; }
+.last-cta   { font-size:11px; color:rgba(180,150,40,.6); white-space:nowrap; }
+
+/* ════════════════════════════════════════════════════════════
+   GAME TILES
+════════════════════════════════════════════════════════════ */
+.games-section { margin-bottom:16px; }
+.games-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.games-in .game-tile:nth-child(1) { animation: tileIn .55s cubic-bezier(0.22,1,0.36,1) .05s both; }
+.games-in .game-tile:nth-child(2) { animation: tileIn .55s cubic-bezier(0.22,1,0.36,1) .15s both; }
+@keyframes tileIn {
+	from { opacity:0; transform:translateY(20px) scale(.96); }
+	to   { opacity:1; transform:translateY(0) scale(1); }
+}
+
+.game-tile {
+	position:relative; border-radius:20px; overflow:hidden;
+	background:rgba(8,14,20,.9); border:1px solid rgba(255,255,255,.07);
+	transition:transform .2s cubic-bezier(0.34,1.3,0.64,1), box-shadow .2s, border-color .2s;
+}
+.game-tile:hover { transform:translateY(-4px) scale(1.01); }
+.bj-tile:hover  { border-color:rgba(52,211,153,.2); box-shadow:0 12px 40px rgba(0,0,0,.5),0 0 24px rgba(52,211,153,.06); }
+.bac-tile:hover { border-color:rgba(220,120,30,.2); box-shadow:0 12px 40px rgba(0,0,0,.5),0 0 24px rgba(220,120,30,.06); }
+.tile-broke { opacity:.5; pointer-events:none; }
+
+.tile-glow {
+	position:absolute; inset:0; opacity:0;
+	transition:opacity .3s;
+	pointer-events:none;
+}
+.game-tile:hover .tile-glow { opacity:1; }
+.bj-glow  { background:radial-gradient(ellipse at 50% 0%, rgba(52,211,153,.08) 0%, transparent 65%); }
+.bac-glow { background:radial-gradient(ellipse at 50% 0%, rgba(220,120,30,.08) 0%, transparent 65%); }
+
+.tile-inner { position:relative; z-index:1; padding:16px 14px 14px; }
+
+.tile-suit-bg {
+	position:absolute; bottom:-10px; right:-5px; font-size:80px;
+	color:rgba(255,255,255,.025); font-weight:900; pointer-events:none;
+	user-select:none; line-height:1;
+}
+
+.tile-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.tile-suit    { font-size:20px; color:rgba(255,255,255,.6); }
+.bac-suit     { color:rgba(220,120,30,.7); }
+.tile-badge {
+	font-size:8px; font-weight:800; letter-spacing:.12em;
+	border-radius:999px; padding:2px 8px; text-transform:uppercase;
+}
+.bj-badge  { background:rgba(52,211,153,.12); color:rgba(52,211,153,.8); border:1px solid rgba(52,211,153,.2); }
+.bac-badge { background:rgba(220,120,30,.12); color:rgba(220,120,30,.8); border:1px solid rgba(220,120,30,.2); }
+
+.tile-name {
+	font-size:16px; font-weight:900; letter-spacing:.12em;
+	margin:0 0 6px; text-transform:uppercase; color:#fff;
+}
+.tile-desc { font-size:11px; color:rgba(255,255,255,.35); line-height:1.5; margin-bottom:10px; }
+
+.tile-meta { display:flex; align-items:center; gap:5px; margin-bottom:12px; }
+.tm-item { font-size:8px; color:rgba(255,255,255,.2); letter-spacing:.08em; text-transform:uppercase; }
+.tm-dot  { color:rgba(255,255,255,.1); font-size:8px; }
+
+.tile-actions { display:flex; flex-direction:column; gap:6px; }
+.tile-play {
+	display:block; text-align:center; text-decoration:none;
+	font-size:11px; font-weight:800; letter-spacing:.12em;
+	border-radius:10px; padding:9px;
+	transition:all .15s; text-transform:uppercase;
+}
+.bj-play  { background:rgba(52,211,153,.15); color:rgba(52,211,153,.9); border:1px solid rgba(52,211,153,.25); }
+.bj-play:hover  { background:rgba(52,211,153,.22); border-color:rgba(52,211,153,.4); }
+.bac-play { background:rgba(220,120,30,.15); color:rgba(220,120,30,.9); border:1px solid rgba(220,120,30,.25); }
+.bac-play:hover { background:rgba(220,120,30,.22); border-color:rgba(220,120,30,.4); }
+.tile-play-broke { background:rgba(255,255,255,.04); color:rgba(255,255,255,.2); border:1px solid rgba(255,255,255,.06); cursor:not-allowed; }
+.tile-rules { font-size:9px; color:rgba(255,255,255,.2); background:none; border:none; cursor:pointer; transition:color .15s; letter-spacing:.1em; text-transform:uppercase; }
+.tile-rules:hover { color:rgba(255,255,255,.5); }
+
+/* ════════════════════════════════════════════════════════════
+   HISTORY LINK
+════════════════════════════════════════════════════════════ */
+.history-section { margin-bottom:24px; }
+.history-link {
+	display:flex; align-items:center; justify-content:center; gap:10px;
+	background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.07);
+	border-radius:14px; padding:14px; text-decoration:none; color:rgba(255,255,255,.5);
+	font-size:12px; font-weight:600; letter-spacing:.1em; text-transform:uppercase;
+	transition:all .2s;
+}
+.history-link:hover { background:rgba(255,255,255,.05); border-color:rgba(255,255,255,.12); color:rgba(255,255,255,.75); }
+.hl-icon { font-size:14px; }
+.hl-arrow { margin-left:auto; font-size:14px; opacity:.4; }
+
+/* ════════════════════════════════════════════════════════════
+   FOOTER
+════════════════════════════════════════════════════════════ */
+.lobby-footer {
+	text-align:center; font-size:10px; letter-spacing:.18em;
+	color:rgba(255,255,255,.1); text-transform:uppercase;
+}
+
+/* ════════════════════════════════════════════════════════════
+   MODAL
+════════════════════════════════════════════════════════════ */
+.modal-backdrop {
+	position:fixed; inset:0; z-index:40;
+	background:rgba(0,0,0,.82); backdrop-filter:blur(6px);
+	display:flex; align-items:center; justify-content:center;
+	padding:16px;
+}
+.modal-card {
+	position:relative; z-index:50; width:100%; max-width:420px;
+	max-height:88dvh; overflow-y:auto;
+	background:#07101a; border:1px solid rgba(255,255,255,.08);
+	border-radius:24px; padding:28px 24px 20px;
+	box-shadow:0 20px 80px rgba(0,0,0,.7);
+}
+.modal-close {
+	position:absolute; top:14px; right:14px;
+	background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1);
+	border-radius:8px; color:rgba(255,255,255,.4);
+	width:28px; height:28px; cursor:pointer; font-size:11px;
+	transition:all .15s; display:flex; align-items:center; justify-content:center;
+}
+.modal-close:hover { color:#fff; background:rgba(255,255,255,.1); }
+
+.modal-body { }
+.modal-header { display:flex; align-items:center; gap:12px; margin-bottom:20px; }
+.modal-icon { font-size:28px; color:rgba(52,211,153,.8); }
+.bac-modal-icon { color:rgba(220,120,30,.8); }
+.modal-header h2 { font-size:20px; font-weight:800; margin:0; }
+
+.rule-section { margin-bottom:16px; }
+.rule-heading { font-size:8px; font-weight:800; letter-spacing:.25em; text-transform:uppercase; margin:0 0 8px; }
+.bj-heading  { color:rgba(52,211,153,.7); }
+.bac-heading { color:rgba(220,120,30,.7); }
+.rule-text   { font-size:12px; color:rgba(255,255,255,.55); line-height:1.6; margin:0; }
+.rule-note   { font-size:10px; color:rgba(255,255,255,.3); text-align:center; margin-top:8px; }
+
+.value-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.value-cell { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.07); border-radius:10px; padding:10px 6px; text-align:center; }
+.vc-val { font-size:14px; font-weight:700; color:#fff; margin:0 0 2px; }
+.vc-key { font-size:9px; color:rgba(255,255,255,.3); margin:0; }
+
+.action-list { display:flex; flex-direction:column; gap:6px; }
+.action-row { display:flex; align-items:center; gap:10px; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); border-radius:10px; padding:8px 12px; }
+.act-badge { border-radius:6px; padding:2px 8px; font-size:9px; font-weight:700; color:#fff; white-space:nowrap; }
+.act-desc  { font-size:11px; color:rgba(255,255,255,.5); }
+
+.payout-list { display:flex; flex-direction:column; gap:4px; }
+.payout-row { display:flex; justify-content:space-between; font-size:12px; color:rgba(255,255,255,.4); padding:4px 0; border-bottom:1px solid rgba(255,255,255,.04); }
+.pay-val   { font-weight:700; }
+.pay-gold  { color:#fbbf24; }
+.pay-green { color:#34d399; }
+.pay-amber { color:#f59e0b; }
+.pay-red   { color:#f87171; }
+
+.rule-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; }
+.rule-list li { display:flex; align-items:center; gap:8px; font-size:11px; color:rgba(255,255,255,.45); }
+.rule-check { color:#34d399; }
+
+.natural-box { background:rgba(180,140,20,.1); border:1px solid rgba(180,140,20,.25); border-radius:10px; padding:10px 14px; font-size:11px; color:rgba(255,220,100,.7); }
+
+.draw-list { display:flex; flex-direction:column; gap:6px; }
+.draw-row  { display:flex; gap:10px; font-size:11px; color:rgba(255,255,255,.45); background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); border-radius:10px; padding:8px 12px; }
+.draw-side { font-weight:700; color:rgba(220,120,30,.7); white-space:nowrap; }
+
+.modal-close-btn {
+	display:block; width:100%; margin-top:16px;
+	background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1);
+	border-radius:12px; padding:11px; color:rgba(255,255,255,.5);
+	font-size:12px; font-weight:600; letter-spacing:.08em; cursor:pointer;
+	transition:all .15s;
+}
+.modal-close-btn:hover { background:rgba(255,255,255,.09); color:rgba(255,255,255,.8); }
 </style>
