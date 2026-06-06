@@ -1,115 +1,262 @@
-# Casino Prototype
+# Royal Table – Casino Prototype
 
 ## Projektbeschreibung
 
-Diese Webanwendung ist ein Prototyp für ein einfaches Casino-Spiel. Der Hauptworkflow basiert auf Blackjack: Nutzer können einen Einsatz eingeben, eine Spielrunde starten, ein Ergebnis erhalten und die gespielten Runden in einer History einsehen.
+Royal Table ist ein moderner Casino-Prototyp, der im Rahmen des Moduls Prototyping entwickelt wurde.
 
-Der Prototyp wurde im Rahmen des Moduls Prototyping umgesetzt.
+Ziel des Projekts war die Entwicklung einer webbasierten Anwendung mit einem vollständigen End-to-End-Workflow. Die Anwendung ermöglicht das Spielen von Blackjack und Baccarat, die Verwaltung von Benutzerkonten, die Speicherung von Spielständen sowie die Analyse vergangener Spielrunden.
 
-## Ziel des Prototyps
+Während des Projekts wurde besonderer Wert auf Benutzerfreundlichkeit, visuelles Feedback, moderne UI-Gestaltung sowie die Umsetzung eines realistischen Casino-Erlebnisses gelegt.
 
-Ziel ist es, einen funktionierenden End-to-End-Workflow umzusetzen:
+---
 
-1. Startseite öffnen
-2. Blackjack auswählen
-3. Einsatz eingeben
-4. Runde starten
+# Ziel des Prototyps
+
+Ziel war die Umsetzung eines funktionsfähigen Casino-Prototyps mit folgenden Kernanforderungen:
+
+1. Benutzer registrieren oder als Gast spielen
+2. Spiel auswählen
+3. Einsatz platzieren
+4. Spielrunde durchführen
 5. Ergebnis anzeigen
-6. Spielrunde in MongoDB speichern
-7. gespeicherte Runden in der History anzeigen
+6. Daten speichern
+7. Spielhistorie anzeigen
+8. Benutzerbezogene Statistiken verwalten
 
-## Verwendete Technologien
+---
 
-- SvelteKit
-- TypeScript
-- Tailwind CSS
-- MongoDB Atlas
-- Git / GitHub
-- Netlify
+# Verwendete Technologien
 
-## Hauptfunktionen
+* SvelteKit
+* TypeScript
+* Tailwind CSS
+* MongoDB Atlas
+* Netlify
+* Git
+* GitHub
+* Visual Studio Code
 
-- Blackjack-Runde starten
-- Einsatzbetrag eingeben
-- zufälliges Spielergebnis berechnen
-- Ergebnis speichern
-- gespeicherte Spielrunden anzeigen
-- Deployment über Netlify
+---
 
-## Datenbank
+# Umgesetzte Funktionen
 
-Die Spielrunden werden in MongoDB gespeichert. Pro Spielrunde werden folgende Daten gespeichert:
+## Benutzerverwaltung
 
-- Spieltyp
-- Einsatzbetrag
-- Punktzahl Spieler
-- Punktzahl Dealer
-- Ergebnis
-- Erstellungsdatum
+* Registrierung neuer Benutzer
+* Login und Logout
+* Passwort-Hashing
+* Session-Verwaltung
+* Persistente Speicherung der Benutzerdaten
 
-## Deployment
+## Blackjack
 
-Die Anwendung ist online über Netlify erreichbar:
+* Hit
+* Stand
+* Double Down
+* Split
+* Insurance
+* Side Bets
+* Blackjack-Erkennung
+* Dealer Peek
+* Automatische Dealer-Logik
+
+## Baccarat
+
+* Player Bet
+* Banker Bet
+* Tie Bet
+* Automatische Baccarat-Regeln
+* Natural Hands
+* Cinematic Card Reveal
+* Autoplay-Modus
+* Manuelle Kartenaufdeckung
+
+## Spielhistorie
+
+* Speicherung gespielter Runden
+* Anzeige vergangener Spiele
+* Benutzerbezogene Historie
+* Session Journal
+
+## Statistik
+
+* Anzahl gespielter Hände
+* Gewinnrate
+* Anzahl Siege
+* Anzahl Niederlagen
+* Gesamtgewinn / Gesamtverlust
+* Beste Runde
+
+## Benutzeroberfläche
+
+* Modernes Casino-Design
+* Animationen
+* Soundeffekte
+* Visuelles Feedback
+* Responsive Gestaltung
+* Konsistente Benutzerführung
+
+---
+
+# Datenbank
+
+Die Anwendung verwendet MongoDB Atlas zur persistenten Datenspeicherung.
+
+Gespeichert werden unter anderem:
+
+* Benutzerkonten
+* Passwort-Hashes
+* Spielhistorie
+* Session-Daten
+* Statistiken
+* Spielresultate
+
+---
+
+# Deployment
+
+Die Anwendung wurde mit Netlify veröffentlicht und ist online verfügbar.
+
+Deployment URL:
 
 https://casino-prototype.netlify.app/
 
-## GitHub Repository
+---
+
+# GitHub Repository
 
 https://github.com/MyMumSwimsFaster/casino-prototype
 
-## Bezug zum Mockup
+---
 
-Das finale UI wurde vereinfacht und angepasst, damit der Hauptworkflow stabil funktioniert. Das Casino-Thema, dunkle Farbschema, Blackjack-Ablauf, Einsatz und Ergebnisanzeige wurden übernommen.
+# Vorgehen
 
-## Einsatz von KI-Tools
+Die Entwicklung erfolgte anhand der im Modul vermittelten Phasen:
 
-Für die Entwicklung wurde KI-Unterstützung verwendet, insbesondere für:
+## Understand / Define
 
-- Strukturierung des SvelteKit-Projekts
-- Unterstützung bei der MongoDB-Anbindung
-- Erstellung und Verbesserung von Code
-- Debugging von Fehlern
-- Formulierung der Dokumentation
+Analyse der Anforderungen und Definition der Kernfunktionen eines Casino-Prototyps.
 
-Der Code wurde geprüft, getestet und eigenständig angepasst.
+## Sketch
 
-## Aktueller Stand
+Erstellung von Mockups und ersten Oberflächenentwürfen.
 
-Der Prototyp ist als Zwischenergebnis funktionsfähig. Der Hauptworkflow funktioniert vollständig und die Daten werden persistent gespeichert.
+## Decide
 
-## Mögliche Erweiterungen
+Auswahl der finalen Lösung sowie Definition der wichtigsten Workflows.
 
-- Baccarat als weiterer Workflow
-- echte Blackjack-Kartenlogik
-- Gewinn-/Verluststatistiken
-- Filterfunktion in der History
-- Benutzerkonten
-- Admin-Ansicht
+## Prototype
 
-## Promptvorgehen / KI-Workflow
+Implementierung der Anwendung mit SvelteKit, MongoDB und Netlify.
 
-Während der Entwicklung wurde KI-Unterstützung gezielt eingesetzt, um technische Probleme effizient zu lösen und die Entwicklung des Prototyps zu beschleunigen.
+## Validate
 
-Die KI wurde insbesondere für folgende Bereiche verwendet:
+Durchführung einer Usability-Evaluation mit einer Testperson sowie anschliessende Verbesserung der Anwendung.
 
-- Planung der Projektstruktur in SvelteKit
-- Entwicklung des End-to-End-Workflows
-- Integration von MongoDB Atlas
-- Erstellung von API-Routen
-- Debugging von State-Management und Event-Handling
-- Deployment mit Netlify
-- Verbesserung von UI/UX und Benutzerfeedback
-- Dokumentation und technische Strukturierung
+---
 
-Beispiele für verwendete Prompts:
+# Usability Evaluation
 
-- „Erstelle eine modulare SvelteKit-Struktur für einen Casino-Prototypen mit mehreren Routen.“
-- „Wie implementiere ich eine persistente Speicherung von Spielrunden mit MongoDB Atlas in SvelteKit?“
-- „Wie kann ein End-to-End-Workflow für Blackjack technisch umgesetzt werden?“
-- „Analysiere den Fehler beim Deployment auf Netlify und identifiziere mögliche Ursachen.“
-- „Wie können API-Routes in SvelteKit genutzt werden, um Spielrunden serverseitig zu speichern?“
-- „Wie kann eine History-Seite erstellt werden, welche MongoDB-Daten serverseitig lädt und darstellt?“
-- „Verbessere die Benutzerführung und das visuelle Feedback im aktuellen UI.“
-- „Wie kann das bestehende Mockup technisch vereinfacht und stabil implementiert werden?“
+Die Anwendung wurde mit einer Testperson evaluiert.
 
-Die generierten Vorschläge wurden analysiert, getestet und an die Anforderungen des Projekts angepasst.
+Während der Durchführung wurden zentrale Workflows beobachtet und dokumentiert.
+
+Auf Basis der Erkenntnisse wurden verschiedene Verbesserungen umgesetzt, beispielsweise:
+
+* Optimierung der Benutzerführung
+* Verbesserungen im Layout
+* Klareres visuelles Feedback
+* Anpassungen bei Animationen
+* Erweiterung von Hilfestellungen und Informationen
+
+Die vollständige Evaluation befindet sich im separaten Dokument der Usability-Evaluation.
+
+---
+
+# Erweiterungen über den Mindestumfang hinaus
+
+Folgende Funktionen wurden zusätzlich zum Mindestumfang umgesetzt:
+
+* Benutzerkonten
+* Authentifizierung
+* MongoDB-basierte Sessions
+* Baccarat als zweites Spiel
+* Side Bets
+* Sound-System
+* Autoplay-Modus
+* Erweiterte Statistiken
+* Benutzerbezogene Historie
+* Premium Casino User Interface
+* Verbesserte Animationen und visuelles Feedback
+
+---
+
+# Einsatz von KI-Tools
+
+Für die Entwicklung wurden KI-Tools unterstützend eingesetzt.
+
+Verwendete Werkzeuge:
+
+* ChatGPT
+* Claude
+
+Die KI wurde insbesondere genutzt für:
+
+* Strukturierung des Projekts
+* Unterstützung bei der Entwicklung
+* Fehlersuche und Debugging
+* Optimierung von UI und UX
+* Deployment-Probleme
+* Dokumentation
+
+Alle generierten Vorschläge wurden geprüft, getestet und eigenständig angepasst.
+
+Die Verantwortung für den finalen Code lag jederzeit beim Entwickler.
+
+---
+
+# Promptvorgehen / KI-Workflow
+
+Während der Entwicklung wurde KI gezielt eingesetzt, um technische Probleme effizient zu lösen und Entwicklungsprozesse zu beschleunigen.
+
+Einsatzbereiche:
+
+* Planung der Projektstruktur
+* Entwicklung der Datenbankanbindung
+* Authentifizierung
+* API-Routen
+* MongoDB Integration
+* UI-Verbesserungen
+* Deployment
+* Fehleranalyse
+* Dokumentation
+
+Beispiele verwendeter Prompts:
+
+* „Erstelle eine modulare SvelteKit-Struktur für einen Casino-Prototypen.“
+* „Wie implementiere ich Benutzerkonten mit MongoDB in SvelteKit?“
+* „Analysiere den Fehler beim Netlify Deployment.“
+* „Wie kann eine persistente Spielhistorie umgesetzt werden?“
+* „Verbessere die Benutzerführung und das visuelle Feedback.“
+* „Wie kann Baccarat mit automatischen Regeln umgesetzt werden?“
+
+Die generierten Vorschläge wurden analysiert, getestet und den Projektanforderungen angepasst.
+
+---
+
+# Aktueller Stand
+
+Der Prototyp ist funktionsfähig und online verfügbar.
+
+Alle zentralen Workflows funktionieren vollständig:
+
+* Registrierung
+* Login
+* Blackjack
+* Baccarat
+* Speicherung von Spielrunden
+* Historie
+* Statistiken
+* Deployment
+
+Der entwickelte Funktionsumfang übersteigt den definierten Mindestumfang deutlich.
