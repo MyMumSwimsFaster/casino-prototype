@@ -1,8 +1,11 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount }   from 'svelte';
+	import { goto }      from '$app/navigation';
 	import { fly, fade } from 'svelte/transition';
 	import { getBankroll, setBankroll, baccaratPayout, type BaccaratSelectedBet, type BaccaratResult } from '$lib/bankroll';
 	import { recordRoundDirect, type RoundOutcome } from '$lib/stats';
+	import { isLoggedIn } from '$lib/bankroll';
+	import { guestHistorySave } from '$lib/guestHistory';
 	import { sfx, getMuted, toggleMuted as _toggleMuted } from '$lib/sounds';
 	import GameOver from '$lib/components/GameOver.svelte';
 
@@ -139,12 +142,55 @@
 	}
 
 	// isBankrupt: disables EOR buttons during countdown/show-hand
-	let isBankrupt = $derived(bankroll <= 0 && phase === 'result');
+	let isBankrupt  = $derived(bankroll <= 0 && phase === 'result');
+	let showRules   = $state(false);
+
+	// ── Forfeit / Leave Guard ────────────────────────────────────────────────
+	let showForfeit   = $state(false);
+	let isGameActive  = $derived(
+		phase !== 'setup' && phase !== 'result'
+	);
+
+	function handleMenuClick() {
+		if (isGameActive) { showForfeit = true; }
+		else              { goto('/'); }
+	}
+
+	async function forfeitHand() {
+		// Baccarat: bankroll already had bet deducted (bet removed at dealCards call)
+		// Net = we simply don't pay anything back → loss = -bet
+		const bankrollAfter = bankroll; // already reduced
+		try {
+			await fetch('/api/save-game', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					game:           'baccarat',
+					bet,
+					selectedBet,
+					playerCards:    (round?.playerCards ?? []).map(cardLabel),
+					bankerCards:    (round?.bankerCards ?? []).map(cardLabel),
+					playerScore:    round?.playerScore  ?? 0,
+					bankerScore:    round?.bankerScore  ?? 0,
+					result:         'forfeited',
+					playerWon:      false,
+					naturalHand:    round?.naturalHand  ?? false,
+					payout:         0,
+					bankrollBefore: bankroll + bet,   // reconstruct: bankroll before bet
+					bankrollAfter:  bankrollAfter,
+					netResult:      -bet,
+				}),
+			});
+		} catch {}
+		recordRoundDirect('loss', -bet);
+		showForfeit = false;
+		goto('/');
+	}
 
 	// ── Auto Reveal Toggle ──────────────────────────────────────────────────
 	// Controls whether cards reveal automatically (cinematic) or manually (user clicks each card).
 	// Does NOT affect game rounds — one round per deal, always.
-	let autoReveal = $state(true); // default: cinematic auto-reveal ON
+	let autoReveal = $state(false); // default: manual reveal (user must opt-in to auto)
 
 	// ── Chip selection (Blackjack-style) ─────────────────────────────────────
 	let selectedChip = $state(25);
@@ -221,26 +267,98 @@
 	function toggleMute() { muted = _toggleMuted(); }
 
 	// ── Auto Reveal hint (shown once, tracked in localStorage) ───────────────
-	let showRevealHint = $state(false);
-	let hintTimer: ReturnType<typeof setTimeout> | null = null;
+	// ── Auto-Reveal Hint System ────────────────────────────────────────────────
+	// Bidirectional contextual hints — no modals, no blocking.
+	// MANUAL users: after 3 manual rounds → suggest Auto.
+	// AUTO users:   after 10 auto rounds  → suggest Manual.
+	// Re-shows only after 10 further rounds since last dismissal.
 
-	function dismissHint() {
-		showRevealHint = false;
+	type HintKind = 'try-auto' | 'try-manual' | null;
+	let hintKind:  HintKind  = $state(null);
+	let hintTimer: ReturnType<typeof setTimeout> | null = null;
+	let autoHintTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// ── localStorage keys ───────────────────────────────────────────────────────
+	const LS_AR_STATE        = 'bac_ar_state';        // 'auto' | 'manual'
+	const LS_MANUAL_ROUNDS   = 'bac_manual_rounds';   // int
+	const LS_AUTO_ROUNDS     = 'bac_auto_rounds';     // int
+	const LS_HINT_AT         = 'bac_hint_at_round';   // total round at last dismiss
+	const LS_TOTAL_ROUNDS    = 'bac_total_rounds';    // int — ever played
+
+	const MANUAL_HINT_AFTER  = 3;   // show hint after this many consecutive manual rounds
+	const AUTO_HINT_AFTER    = 10;  // show hint after this many consecutive auto rounds
+	const HINT_COOLDOWN      = 10;  // minimum rounds between hints
+	const HINT_AUTO_DISMISS  = 7000; // ms before hint auto-disappears
+
+	function _lsGet(key: string): number {
+		try { return parseInt(localStorage.getItem(key) ?? '0') || 0; } catch { return 0; }
+	}
+	function _lsSet(key: string, val: number | string) {
+		try { localStorage.setItem(key, String(val)); } catch {}
+	}
+
+	/** Called at end of every completed round */
+	function tickRoundCounter() {
+		const total = _lsGet(LS_TOTAL_ROUNDS) + 1;
+		_lsSet(LS_TOTAL_ROUNDS, total);
+		if (autoReveal) {
+			_lsSet(LS_AUTO_ROUNDS,   _lsGet(LS_AUTO_ROUNDS)   + 1);
+			_lsSet(LS_MANUAL_ROUNDS, 0); // reset manual streak
+		} else {
+			_lsSet(LS_MANUAL_ROUNDS, _lsGet(LS_MANUAL_ROUNDS) + 1);
+			_lsSet(LS_AUTO_ROUNDS,   0); // reset auto streak
+		}
+		// Schedule hint check after a brief delay (let result panel settle first)
+		setTimeout(maybeShowHint, 1200);
+	}
+
+	function maybeShowHint() {
+		if (hintKind !== null) return; // already showing
+		const total     = _lsGet(LS_TOTAL_ROUNDS);
+		const hintAt    = _lsGet(LS_HINT_AT);
+		if (total - hintAt < HINT_COOLDOWN && hintAt > 0) return; // still in cooldown
+		const manualRounds = _lsGet(LS_MANUAL_ROUNDS);
+		const autoRounds   = _lsGet(LS_AUTO_ROUNDS);
+		if (!autoReveal && manualRounds >= MANUAL_HINT_AFTER) {
+			showHint('try-auto');
+		} else if (autoReveal && autoRounds >= AUTO_HINT_AFTER) {
+			showHint('try-manual');
+		}
+	}
+
+	function showHint(kind: HintKind) {
+		hintKind = kind;
+		if (hintTimer) clearTimeout(hintTimer);
+		hintTimer = setTimeout(() => dismissHint('timeout'), HINT_AUTO_DISMISS);
+	}
+
+	function dismissHint(reason: 'timeout' | 'not-now' | 'accepted' = 'not-now') {
+		hintKind = null;
 		if (hintTimer) { clearTimeout(hintTimer); hintTimer = null; }
-		try { localStorage.setItem('bac_ar_hint_seen', '1'); } catch {}
+		// Record dismissal round for cooldown
+		_lsSet(LS_HINT_AT, _lsGet(LS_TOTAL_ROUNDS));
+		// Reset streaks so hint doesn't fire again immediately
+		if (reason !== 'accepted') {
+			_lsSet(LS_MANUAL_ROUNDS, 0);
+			_lsSet(LS_AUTO_ROUNDS,   0);
+		}
+	}
+
+	function acceptHint() {
+		const kind = hintKind;
+		dismissHint('accepted');
+		if (kind === 'try-auto')    setAutoReveal(true);
+		if (kind === 'try-manual')  setAutoReveal(false);
 	}
 
 	onMount(() => {
 		bankroll = getBankroll();
-		muted = getMuted();
-		// Show first-time hint after 1.2s if not seen before
+		muted    = getMuted();
+		// Restore autoReveal preference from localStorage
 		try {
-			if (!localStorage.getItem('bac_ar_hint_seen')) {
-				setTimeout(() => {
-					showRevealHint = true;
-					hintTimer = setTimeout(dismissHint, 5000);
-				}, 1200);
-			}
+			const saved = localStorage.getItem(LS_AR_STATE);
+			if (saved === 'auto')   autoReveal = true;
+			// 'manual' or null → already false (default)
 		} catch {}
 	});
 
@@ -286,6 +404,11 @@
 	// Toggle handler — works mid-round
 	function setAutoReveal(val: boolean) {
 		autoReveal = val;
+		// Persist user preference
+		try { localStorage.setItem(LS_AR_STATE, val ? 'auto' : 'manual'); } catch {}
+		// Reset the other streak so hint logic is fresh after a mode change
+		if (val) _lsSet(LS_MANUAL_ROUNDS, 0);
+		else     _lsSet(LS_AUTO_ROUNDS, 0);
 		if (!val) {
 			// OFF: kill any pending timer, hand control to user
 			stopAutoRevealTimer();
@@ -495,6 +618,8 @@
 			else if (bacNetResult < 0) sfx.lose();
 		}, 350);
 
+		if (isLoggedIn()) {
+			// Logged-in: persist to MongoDB
 		try {
 			await fetch('/api/save-game', {
 				method: 'POST',
@@ -519,6 +644,28 @@
 		lastBet = bet;
 		lastSelectedBet = selectedBet;
 		} catch (e) { console.error('Failed to save:', e); }
+		} else {
+			// Guest: sessionStorage only — never shared between sessions
+			if (round) {
+				const _net = Math.round((bankroll - bankrollBefore) * 100) / 100;
+				guestHistorySave({
+					game:        'baccarat',
+					bet,
+					selectedBet,
+					playerCards: round.playerCards.map(cardLabel),
+					bankerCards: round.bankerCards.map(cardLabel),
+					playerScore: round.playerScore,
+					bankerScore: round.bankerScore,
+					result:      round.result,
+					playerWon:   round.result === 'Player wins',
+					naturalHand: round.naturalHand,
+					payout:      payout ?? 0,
+					bankrollBefore,
+					bankrollAfter: bankroll,
+					netResult:     _net,
+				});
+			}
+		}
 	}
 
 	function handleGameOverReset() {
@@ -589,6 +736,7 @@
 <!-- ═══════════════════════════════════════════════════════════
      BACCARAT — Cinematic Casino Experience
 ═══════════════════════════════════════════════════════════════ -->
+<svelte:window onkeydown={(e) => { if(e.key==='Escape') showRules=false; }} />
 <main class="bac-root">
 
   <!-- TOAST -->
@@ -600,17 +748,23 @@
 
   <!-- HEADER -->
   <header class="bac-header">
-    <a href="/" class="bac-header-link">← Menü</a>
-    <div class="bac-bankroll">
-      <span class="bac-bankroll-lbl">Balance</span>
-      <span class="bac-bankroll-val {bankroll<=0?'red':bankroll<100?'amber':'green'}">
-        {bankroll.toFixed(2)} CHF
+    <!-- LEFT: menu -->
+    <button onclick={handleMenuClick} class="hud-menu-btn" aria-label="Menu">← Menü</button>
+
+    <!-- CENTER: balance -->
+    <div class="hud-balance">
+      <span class="hud-balance-label">BALANCE</span>
+      <span class="hud-balance-val {bankroll<=0?'red':bankroll<100?'amber':'green'}">
+        {bankroll.toFixed(2)} <span class="hud-balance-cur">CHF</span>
       </span>
     </div>
-    <div class="bac-header-right">
-      <button onclick={toggleMute} class="bac-mute" aria-label="Mute">
+
+    <!-- RIGHT: utility controls -->
+    <div class="hud-controls">
+      <button onclick={toggleMute} class="hud-ctrl-btn" aria-label="Mute" title={muted?'Unmute':'Mute'}>
         {muted ? '🔇' : '🔊'}
       </button>
+      <button onclick={() => showRules = true} class="hud-ctrl-btn" aria-label="Rules" title="Rules">📖</button>
       <!-- Auto Reveal toggle -->
       <div class="bac-ar-wrap">
         <button onclick={() => { setAutoReveal(!autoReveal); dismissHint(); }}
@@ -621,17 +775,29 @@
           <span class="bac-ar-icon">{autoReveal ? '🎬' : '🎴'}</span>
           <span class="bac-ar-label">{autoReveal ? 'AUTO' : 'MANUAL'}</span>
         </button>
-        <!-- First-time hint bubble -->
-        {#if showRevealHint}
-          <div class="bac-hint-bubble" transition:fly={{ y: 6, duration: 280 }}>
+        <!-- Contextual hint bubble: try-auto or try-manual -->
+        {#if hintKind !== null}
+          <div class="bac-hint-bubble" transition:fly={{ y: 8, duration: 300 }}>
             <span class="bac-hint-arrow"></span>
-            <p class="bac-hint-title">Reveal Mode</p>
-            <p class="bac-hint-body">Auto — cinematic reveal<br>Manual — flip each card</p>
-            <button onclick={dismissHint} class="bac-hint-close">✕</button>
+            {#if hintKind === 'try-auto'}
+              <p class="bac-hint-title">Tip</p>
+              <p class="bac-hint-body">Too many taps? Let the table<br>reveal cards for you.</p>
+              <div class="bac-hint-actions">
+                <button onclick={acceptHint}              class="bac-hint-accept">✦ Try Auto</button>
+                <button onclick={() => dismissHint('not-now')} class="bac-hint-dismiss">Not now</button>
+              </div>
+            {:else}
+              <p class="bac-hint-title">Tip</p>
+              <p class="bac-hint-body">Want real table tension?<br>Flip each card yourself.</p>
+              <div class="bac-hint-actions">
+                <button onclick={acceptHint}              class="bac-hint-accept">🎴 Go Manual</button>
+                <button onclick={() => dismissHint('not-now')} class="bac-hint-dismiss">Keep Auto</button>
+              </div>
+            {/if}
           </div>
         {/if}
       </div>
-    </div>
+    </div><!-- /hud-controls -->
   </header>
 
   <!-- TABLE -->
@@ -776,15 +942,6 @@
         </div>
       {/if}
 
-      <!-- Natural badge — premium announcement -->
-      {#if round.naturalHand && ['p0','b0','p1','b1'].every(k => revealed.has(k))}
-        <div class="bac-natural" transition:fly={{ y: -8, duration: 500 }}>
-          <span class="bac-natural-star">✦</span>
-          <span class="bac-natural-text">Natural Hand</span>
-          <span class="bac-natural-star">✦</span>
-        </div>
-      {/if}
-
       <!-- Focus vignette: darkens inactive side during reveal -->
       <div class="bac-focus-vignette
         {revealFocus==='player' ? 'focus-player' : revealFocus==='banker' ? 'focus-banker' : ''}">
@@ -798,6 +955,13 @@
           {phase==='result' && round.result==='Player wins' ? 'side-winner' : ''}
           {phase==='result' && round.result==='Banker wins' ? 'side-loser' : ''}
           {revealFocus==='banker' ? 'side-dimmed' : ''}">
+          {#if round.naturalHand && round.playerScore >= 8 && ['p0','p1'].every(k => revealed.has(k))}
+            <div class="bac-natural-inline bac-natural-player" transition:fly={{ y: -6, duration: 400 }}>
+              <span class="bac-natural-star">✦</span>
+              <span class="bac-natural-text">Natural {round.playerScore}</span>
+              <span class="bac-natural-star">✦</span>
+            </div>
+          {/if}
           <div class="bac-side-header">
             <span class="bac-side-label player-label">PLAYER</span>
             {#if visibleScore(round.playerCards, 'p') !== null}
@@ -869,6 +1033,13 @@
           {phase==='result' && round.result==='Banker wins' ? 'side-winner' : ''}
           {phase==='result' && round.result==='Player wins' ? 'side-loser' : ''}
           {revealFocus==='player' ? 'side-dimmed' : ''}">
+          {#if round.naturalHand && round.bankerScore >= 8 && ['b0','b1'].every(k => revealed.has(k))}
+            <div class="bac-natural-inline bac-natural-banker" transition:fly={{ y: -6, duration: 400 }}>
+              <span class="bac-natural-star">✦</span>
+              <span class="bac-natural-text">Natural {round.bankerScore}</span>
+              <span class="bac-natural-star">✦</span>
+            </div>
+          {/if}
           <div class="bac-side-header">
             <span class="bac-side-label banker-label">BANKER</span>
             {#if visibleScore(round.bankerCards, 'b') !== null}
@@ -1063,6 +1234,98 @@
 </main>
 
 <!-- GAME OVER MODAL -->
+<!-- Forfeit confirm dialog -->
+{#if showForfeit}
+  <div class="forfeit-backdrop" transition:fade={{ duration: 200 }}>
+    <div class="forfeit-modal" transition:fly={{ y: 24, duration: 320 }}>
+      <div class="fm-icon">⚠</div>
+      <h2 class="fm-title">Active Hand</h2>
+      <p class="fm-body">You have an active hand in progress.<br>Leaving now will forfeit the hand and count as a <strong>loss</strong>.</p>
+      <div class="fm-actions">
+        <button onclick={() => showForfeit = false} class="fm-btn-continue">
+          ▶ Continue Playing
+        </button>
+        <button onclick={forfeitHand} class="fm-btn-forfeit">
+          Forfeit Hand &amp; Leave
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Rules Modal -->
+{#if showRules}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="rules-backdrop" onclick={(e)=>{ if((e.target as HTMLElement).classList.contains('rules-backdrop')) showRules=false; }}>
+    <div class="rules-modal" role="dialog" aria-modal="true">
+      <button onclick={() => showRules = false} class="rules-close" aria-label="Close">✕</button>
+
+      <div class="rules-header">
+        <span class="rules-icon">♦</span>
+        <h2 class="rules-title">Baccarat Rules</h2>
+      </div>
+
+      <div class="rules-section">
+        <h3 class="rules-heading" style="color:rgba(220,120,30,.8)">Goal</h3>
+        <p class="rules-text">Bet on which hand — <strong style="color:#93c5fd">Player</strong> or <strong style="color:#fca5a5">Banker</strong> — finishes closest to <strong style="color:#fff">9</strong>.</p>
+      </div>
+
+      <div class="rules-divider"></div>
+
+      <div class="rules-section">
+        <h3 class="rules-heading" style="color:rgba(220,120,30,.8)">Card Values</h3>
+        <div class="rules-value-grid">
+          <div class="rvc"><span class="rvc-val">A</span><span class="rvc-key">= 1</span></div>
+          <div class="rvc"><span class="rvc-val">2–9</span><span class="rvc-key">Face value</span></div>
+          <div class="rvc"><span class="rvc-val">10·J·Q·K</span><span class="rvc-key">= 0</span></div>
+        </div>
+        <p class="rules-note">Only the last digit counts: 7+6 = 13 → score <strong style="color:#fff">3</strong></p>
+      </div>
+
+      <div class="rules-divider"></div>
+
+      <div class="rules-section">
+        <h3 class="rules-heading" style="color:rgba(220,120,30,.8)">Scoring Examples</h3>
+        <div class="rules-example-list">
+          {#each [['7 + 8','15','5'],['6 + 9','15','5'],['K + 5','15','5'],['9 + 9','18','8']] as [cards,sum,score]}
+            <div class="rules-example-row">
+              <span class="rex-cards">{cards}</span>
+              <span class="rex-arrow">= {sum}</span>
+              <span class="rex-arrow">→</span>
+              <span class="rex-score">{score}</span>
+            </div>
+          {/each}
+        </div>
+      </div>
+
+      <div class="rules-divider"></div>
+
+      <div class="rules-section">
+        <h3 class="rules-heading" style="color:rgba(220,120,30,.8)">Payouts</h3>
+        <div class="rules-payout-list">
+          <div class="rules-payout-row"><span>Player wins</span><span class="rpv rpv-green">1:1</span></div>
+          <div class="rules-payout-row"><span>Banker wins</span><span class="rpv rpv-green">0.95:1</span></div>
+          <div class="rules-payout-row"><span>Tie wins</span><span class="rpv rpv-gold">8:1</span></div>
+          <div class="rules-payout-row"><span>Tie (Player/Banker bet)</span><span class="rpv rpv-amber">Push</span></div>
+        </div>
+      </div>
+
+      <div class="rules-divider"></div>
+
+      <div class="rules-section">
+        <h3 class="rules-heading" style="color:rgba(220,120,30,.8)">Natural Hand</h3>
+        <div class="rules-natural-box">✨ 8 or 9 on the first two cards — round ends immediately, no more cards drawn.</div>
+      </div>
+
+      <div class="rules-section" style="margin-top:14px">
+        <h3 class="rules-heading" style="color:rgba(220,120,30,.8)">Auto vs Manual Reveal</h3>
+        <p class="rules-text">Use the <strong style="color:#fff">🎬/🎴 toggle</strong> in the header to switch between cinematic auto-reveal and manual card flipping.</p>
+      </div>
+    </div>
+  </div>
+{/if}
+
+
 {#if gameOver}
   <div class="bac-go-backdrop" transition:fade={{ duration: 350 }}>
     <div class="bac-go-modal" transition:fly={{ y: 30, duration: 420 }}>
@@ -1271,7 +1534,18 @@
 .green { color: #4ade80; } .amber { color: #fbbf24; } .red { color: #f87171; }
 
 /* Header */
-.bac-header { display:flex;align-items:center;justify-content:space-between;padding:10px 16px 6px;background:rgba(0,0,0,.45);border-bottom:1px solid rgba(255,255,255,.04);flex-shrink:0;z-index:20; }
+/* ── BAC HUD Header ─────────────────────────────────────────────── */
+.bac-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 8px 14px;
+  background: rgba(0,0,0,.48);
+  border-bottom: 1px solid rgba(255,255,255,.045);
+  flex-shrink: 0; z-index: 20;
+  gap: 8px;
+}
+/* Reuse shared HUD classes — defined in shared CSS block below */
 .bac-header-link { font-size:11px;color:rgba(74,222,128,.7);text-decoration:none;letter-spacing:.05em; }
 .bac-header-link:hover { color:#4ade80; }
 .bac-bankroll { display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:4px 12px; }
@@ -1657,9 +1931,57 @@
    AUTO REVEAL TOGGLE
 ════════════════════════════════════════════════════ */
 
-/* Header right group */
+/* ── Shared HUD classes (same as Blackjack) ─────────────────────── */
+.hud-menu-btn {
+  justify-self: start;
+  background: none; border: none; cursor: pointer;
+  font-size: 11px; font-weight: 600; letter-spacing: .06em;
+  color: rgba(74,222,128,.65); padding: 0;
+  transition: color .15s; white-space: nowrap;
+}
+.hud-menu-btn:hover { color: #4ade80; }
+
+.hud-balance {
+  justify-self: center;
+  display: flex; flex-direction: column; align-items: center;
+  background: rgba(0,0,0,.5);
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 11px;
+  padding: 4px 16px 5px;
+  min-width: 130px;
+}
+.hud-balance-label {
+  font-size: 7px; font-weight: 800; letter-spacing: .22em;
+  color: rgba(255,255,255,.22); text-transform: uppercase;
+  line-height: 1; margin-bottom: 2px;
+}
+.hud-balance-val {
+  font-size: 15px; font-weight: 900; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.hud-balance-cur { font-size: 10px; font-weight: 500; opacity: .6; }
+
+.hud-controls {
+  justify-self: end;
+  display: flex; align-items: center; gap: 6px;
+}
+.hud-ctrl-btn {
+  width: 30px; height: 30px; border-radius: 8px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.08);
+  font-size: 13px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s, border-color .15s;
+  color: rgba(255,255,255,.65);
+}
+.hud-ctrl-btn:hover {
+  background: rgba(255,255,255,.1);
+  border-color: rgba(255,255,255,.15);
+}
+
+/* bac-header-right becomes hud-controls — keep as alias */
 .bac-header-right {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 6px;
 }
 
 /* Auto Reveal wrapper (positions hint bubble) */
@@ -1721,39 +2043,55 @@
 /* First-time hint bubble */
 .bac-hint-bubble {
   position: absolute; top: calc(100% + 10px); right: 0;
-  width: 160px;
-  background: rgba(6,10,18,.95);
-  border: 1px solid rgba(52,211,153,.25);
-  border-radius: 12px;
-  padding: 10px 12px 10px;
+  width: 188px;
+  background: rgba(4,8,16,.96);
+  border: 1px solid rgba(52,211,153,.22);
+  border-radius: 14px;
+  padding: 11px 13px 10px;
   z-index: 100;
-  box-shadow: 0 8px 30px rgba(0,0,0,.5), 0 0 0 1px rgba(52,211,153,.08);
+  box-shadow: 0 10px 36px rgba(0,0,0,.6), 0 0 0 1px rgba(52,211,153,.06);
 }
 .bac-hint-arrow {
-  position: absolute; top: -5px; right: 14px;
+  position: absolute; top: -5px; right: 18px;
   width: 8px; height: 8px;
-  background: rgba(6,10,18,.95);
-  border-top: 1px solid rgba(52,211,153,.25);
-  border-left: 1px solid rgba(52,211,153,.25);
+  background: rgba(4,8,16,.96);
+  border-top: 1px solid rgba(52,211,153,.22);
+  border-left: 1px solid rgba(52,211,153,.22);
   transform: rotate(45deg);
 }
 .bac-hint-title {
-  font-size: 9px; font-weight: 800; letter-spacing: .15em;
-  color: rgba(52,211,153,.8); text-transform: uppercase;
+  font-size: 7px; font-weight: 800; letter-spacing: .2em;
+  color: rgba(52,211,153,.65); text-transform: uppercase;
   margin-bottom: 4px;
 }
 .bac-hint-body {
-  font-size: 10px; line-height: 1.5;
-  color: rgba(255,255,255,.5);
+  font-size: 10px; line-height: 1.55;
+  color: rgba(255,255,255,.45);
+  margin-bottom: 9px;
 }
-.bac-hint-close {
-  position: absolute; top: 6px; right: 8px;
+.bac-hint-actions {
+  display: flex; gap: 6px; align-items: center;
+}
+.bac-hint-accept {
+  flex: 1;
+  background: rgba(52,211,153,.1);
+  border: 1px solid rgba(52,211,153,.28);
+  border-radius: 8px; padding: 5px 8px;
+  font-size: 9px; font-weight: 800; letter-spacing: .06em;
+  color: rgba(52,211,153,.9); cursor: pointer;
+  transition: all .15s;
+}
+.bac-hint-accept:hover {
+  background: rgba(52,211,153,.18);
+  border-color: rgba(52,211,153,.45);
+}
+.bac-hint-dismiss {
+  background: none; border: none;
   font-size: 9px; color: rgba(255,255,255,.2);
-  background: none; border: none; cursor: pointer;
-  transition: color .15s; padding: 2px;
-  line-height: 1;
+  cursor: pointer; transition: color .15s; padding: 2px 4px;
+  white-space: nowrap;
 }
-.bac-hint-close:hover { color: rgba(255,255,255,.5); }
+.bac-hint-dismiss:hover { color: rgba(255,255,255,.45); }
 
 /* Felt mode badge */
 .bac-mode-badge {
@@ -1923,6 +2261,456 @@
   0%   { transform:scale(.7); opacity:0; }
   60%  { transform:scale(1.08); }
   100% { transform:scale(1); opacity:1; }
+}
+
+
+/* ── Leave Guard ──────────────────────────────────────────────────── */
+.bac-header-link-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 11px; color: rgba(74,222,128,.7); letter-spacing: .05em;
+  padding: 0; transition: color .15s;
+}
+.bac-header-link-btn:hover { color: #4ade80; }
+
+.forfeit-backdrop {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,.75); backdrop-filter: blur(5px);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.forfeit-modal {
+  width: min(340px,100%);
+  background: #060b12;
+  border: 1px solid rgba(239,68,68,.3);
+  border-radius: 22px; padding: 28px 24px 22px;
+  text-align: center;
+  box-shadow: 0 0 60px rgba(220,38,38,.12), 0 20px 60px rgba(0,0,0,.7);
+}
+.fm-icon  { font-size: 32px; margin-bottom: 10px; }
+.fm-title { font-size: 20px; font-weight: 900; color: #fbbf24; letter-spacing: .06em; margin: 0 0 10px; }
+.fm-body  { font-size: 12px; color: rgba(255,255,255,.5); line-height: 1.6; margin: 0 0 20px; }
+.fm-body strong { color: #f87171; }
+.fm-actions { display: flex; flex-direction: column; gap: 8px; }
+.fm-btn-continue {
+  background: linear-gradient(135deg,#166534,#14532d);
+  border: 1px solid rgba(74,222,128,.25);
+  border-radius: 13px; padding: 13px;
+  font-size: 14px; font-weight: 800; color: #fff; cursor: pointer;
+  transition: filter .15s;
+}
+.fm-btn-continue:hover { filter: brightness(1.12); }
+.fm-btn-forfeit {
+  background: rgba(127,29,29,.35);
+  border: 1px solid rgba(239,68,68,.22);
+  border-radius: 13px; padding: 11px;
+  font-size: 12px; font-weight: 700; color: rgba(248,113,113,.7); cursor: pointer;
+  transition: all .15s;
+}
+.fm-btn-forfeit:hover { background: rgba(153,27,27,.5); color: #fca5a5; }
+
+
+/* ── In-game Rules Modal ──────────────────────────────────────── */
+/* .rules-btn now uses .hud-ctrl-btn */
+
+.rules-backdrop {
+  position: fixed; inset: 0; z-index: 9990;
+  background: rgba(0,0,0,.72); backdrop-filter: blur(5px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  animation: rulesBackdropIn .2s ease both;
+}
+@keyframes rulesBackdropIn { from{opacity:0;} to{opacity:1;} }
+
+.rules-modal {
+  position: relative; width: 100%; max-width: 400px;
+  max-height: 86dvh; overflow-y: auto;
+  background: rgba(6,10,18,.96);
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 22px; padding: 26px 22px 22px;
+  box-shadow: 0 20px 70px rgba(0,0,0,.7);
+  animation: rulesModalIn .28s cubic-bezier(0.22,1,0.36,1) both;
+}
+@keyframes rulesModalIn {
+  from { opacity:0; transform: scale(.94) translateY(12px); }
+  to   { opacity:1; transform: scale(1)   translateY(0); }
+}
+.rules-modal::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(to right, transparent, rgba(180,150,40,.3), transparent);
+  border-radius: 22px 22px 0 0;
+}
+
+.rules-close {
+  position: absolute; top: 12px; right: 14px;
+  width: 26px; height: 26px; border-radius: 8px;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+  color: rgba(255,255,255,.4); font-size: 11px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .15s;
+}
+.rules-close:hover { background: rgba(255,255,255,.1); color: #fff; }
+
+.rules-header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+.rules-icon   { font-size: 22px; }
+.rules-title  { font-size: 17px; font-weight: 900; letter-spacing: .06em; margin: 0; }
+
+.rules-section { margin-bottom: 16px; }
+.rules-section:last-child { margin-bottom: 0; }
+.rules-heading {
+  font-size: 8px; font-weight: 800; letter-spacing: .25em;
+  text-transform: uppercase; margin: 0 0 8px;
+}
+.rules-text { font-size: 12px; color: rgba(255,255,255,.5); line-height: 1.6; margin: 0; }
+
+.rules-value-grid {
+  display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; margin-bottom: 0;
+}
+.rvc { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07);
+  border-radius: 10px; padding: 9px 5px; text-align: center; }
+.rvc-val { display: block; font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 2px; }
+.rvc-key { display: block; font-size: 9px; color: rgba(255,255,255,.3); }
+
+.rules-action-list { display: flex; flex-direction: column; gap: 5px; }
+.rules-action-row {
+  display: flex; align-items: center; gap: 9px;
+  background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.05);
+  border-radius: 10px; padding: 7px 11px;
+}
+.rar-badge {
+  border-radius: 6px; padding: 2px 8px;
+  font-size: 9px; font-weight: 800; color: #fff; white-space: nowrap; flex-shrink: 0;
+}
+.rar-desc { font-size: 11px; color: rgba(255,255,255,.45); }
+
+.rules-payout-list { display: flex; flex-direction: column; gap: 3px; }
+.rules-payout-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; color: rgba(255,255,255,.4);
+  padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.rules-payout-row:last-child { border-bottom: none; }
+.rpv { font-weight: 700; }
+.rpv-gold  { color: #fbbf24; } .rpv-green { color: #34d399; }
+.rpv-amber { color: #f59e0b; } .rpv-dim   { color: rgba(255,255,255,.25); }
+
+.rules-divider {
+  height: 1px; margin: 14px 0;
+  background: linear-gradient(to right, transparent, rgba(255,255,255,.07), transparent);
+}
+.rules-note {
+  font-size: 10px; color: rgba(255,255,255,.28); text-align: center; margin-top: 6px;
+}
+.rules-natural-box {
+  background: rgba(180,140,20,.1); border: 1px solid rgba(180,140,20,.22);
+  border-radius: 10px; padding: 9px 13px;
+  font-size: 11px; color: rgba(255,220,100,.65);
+}
+.rules-example-list { display: flex; flex-direction: column; gap: 4px; }
+.rules-example-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; color: rgba(255,255,255,.4);
+}
+.rex-cards { color: rgba(255,255,255,.7); font-weight: 600; }
+.rex-arrow { color: rgba(255,255,255,.2); }
+.rex-score { color: #34d399; font-weight: 700; }
+
+
+/* ════════════════════════════════════════════════════════════════
+   BACCARAT — FULL SYMMETRY & ALIGNMENT POLISH
+   Fixes: Natural banner centering, card table symmetry,
+   visual hierarchy, spacing consistency, optical balance.
+════════════════════════════════════════════════════════════════ */
+
+/* ── 1. NATURAL BANNER — true viewport center ─────────────────
+   Parent is now .bac-table (position:relative, full table area).
+   No padding offset. left:50% + translateX(-50%) = true center. */
+.bac-natural {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  /* Lift above card table */
+  display: flex; align-items: center; gap: 10px;
+  background: linear-gradient(135deg, rgba(92,60,0,.95), rgba(55,36,0,.95));
+  border: 1px solid rgba(251,191,36,.5);
+  border-radius: 999px;
+  padding: 8px 24px;
+  white-space: nowrap;
+  box-shadow:
+    0 0 0 1px rgba(251,191,36,.12),
+    0 8px 32px rgba(0,0,0,.6),
+    0 0 40px rgba(251,191,36,.12);
+  animation: naturalGlowAnim 1.2s cubic-bezier(0.22,1,0.36,1) both;
+}
+
+/* ── 2. CARD TABLE — symmetric padding, equal sides ──────────
+   Old: padding:50px 12px 12px (top offset caused natural misalign).
+   New: equal vertical padding, centered flex layout. */
+.bac-card-table {
+  position: absolute; inset: 0; z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px;          /* equal on all sides — natural banner no longer here */
+}
+
+/* ── 3. BOTH SIDES — perfectly equal layout ──────────────────
+   Explicit min-height keeps both panels same height even when
+   one side has a 3rd card drawn. */
+.bac-side {
+  flex: 1;
+  min-width: 0;
+  display: flex; flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  border-radius: 16px;
+  padding: 14px 10px;
+  background: rgba(0,0,0,.15);
+  border: 1px solid rgba(255,255,255,.06);
+  transition: border-color .3s, box-shadow .3s;
+  min-height: 180px;
+  justify-content: flex-start;
+}
+
+/* ── 4. SIDE HEADER — identical structure both sides ─────────
+   Flex column, centered, score pill always same width. */
+.bac-side-header {
+  display: flex; flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 52px;         /* reserves space even when score not yet visible */
+  justify-content: flex-start;
+}
+
+.bac-side-label {
+  font-size: 8px; font-weight: 800; letter-spacing: .22em;
+  text-transform: uppercase;
+  /* Remove any margin that could cause asymmetry */
+  margin: 0; padding: 0;
+}
+
+.bac-score-pill {
+  min-width: 38px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.7);
+  border: 1px solid rgba(255,255,255,.12);
+  font-size: 16px; font-weight: 900;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.01em;
+}
+/* Score pill colors are symmetric — both use same size/weight */
+.player-score { border-color: rgba(96,165,250,.3);  color: rgba(147,197,253,.9); }
+.banker-score { border-color: rgba(239,68,68,.3);   color: rgba(252,165,165,.9); }
+.score-winner { box-shadow: 0 0 12px rgba(74,222,128,.2); border-color: rgba(74,222,128,.4) !important; }
+
+/* ── 5. CARDS ROW — center-aligned in each side ──────────────*/
+.bac-cards-row {
+  display: flex;
+  align-items: center;      /* vertical center instead of flex-end */
+  justify-content: center;  /* horizontal center within side panel */
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+/* Card sizing consistent */
+.bac-card {
+  width: 52px; height: 76px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+/* ── 6. VS BADGE — optical center ────────────────────────────*/
+.bac-vs {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; flex-shrink: 0;
+  /* The VS/result badge should sit at the visual card-row height */
+  margin-top: 52px;   /* approximate offset to align with card center */
+}
+.bac-vs-result {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 900; letter-spacing: .04em;
+  flex-shrink: 0;
+}
+.vs-player { background: rgba(29,78,216,.75); border: 1.5px solid rgba(96,165,250,.5); color: #93c5fd; }
+.vs-banker { background: rgba(185,28,28,.75); border: 1.5px solid rgba(239,68,68,.5);  color: #fca5a5; }
+.vs-tie    { background: rgba(120,80,0,.75);  border: 1.5px solid rgba(251,191,36,.5); color: #fde68a; }
+.bac-vs-line {
+  font-size: 8px; font-weight: 800; letter-spacing: .14em;
+  color: rgba(255,255,255,.12); text-transform: uppercase;
+}
+
+/* ── 7. DRAW NOTE — symmetric, both sides identical style ────*/
+.bac-draw-note {
+  font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+  margin: 0; padding: 0;
+  opacity: .6;
+}
+.player-note { color: rgba(147,197,253,.7); }
+.banker-note { color: rgba(252,165,165,.7); }
+
+/* ── 8. RESULT OVERLAY — true center, consistent padding ─────*/
+.bac-result-overlay {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(300px, 92%);
+  z-index: 25;
+  border-radius: 20px;
+  padding: 0 0 16px;
+  overflow: hidden;
+}
+
+/* ── 9. SIDE WINNER/LOSER — symmetric glow ───────────────────*/
+.side-winner {
+  border-color: rgba(74,222,128,.28);
+  box-shadow: 0 0 24px rgba(74,222,128,.07), inset 0 0 0 1px rgba(74,222,128,.05);
+}
+.side-loser {
+  opacity: .75;
+  border-color: rgba(255,255,255,.04);
+}
+.side-dimmed {
+  opacity: .45;
+  transition: opacity .35s ease;
+}
+
+/* ── 10. BETTING SPOTS — symmetric alignment ─────────────────
+   Player and Banker are same size. Tie is slightly smaller.
+   All three are vertically bottom-aligned. */
+.bac-spots {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0 16px;
+}
+.bspot-cell {
+  display: flex; flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.bspot-lg { width: 120px; height: 120px; }
+.bspot-md { width: 82px;  height: 82px;  }
+
+/* ── 11. STATUS MESSAGE — centered, doesn't float ────────────*/
+.bac-status {
+  position: absolute;
+  bottom: 18px;
+  left: 0; right: 0;
+  display: flex; justify-content: center;
+  z-index: 15;
+  pointer-events: none;
+}
+
+/* ── 12. CONTROLS — symmetric padding ───────────────────────*/
+.bac-controls {
+  padding: 10px 16px 14px;
+}
+.bac-chip-rack {
+  padding: 8px 12px 6px;
+}
+.bac-deal-row {
+  gap: 8px;
+}
+
+/* ── 13. WATERMARK — optical center (slightly above middle) ──*/
+.bac-watermark {
+  position: absolute;
+  top: 48%; left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* ── 14. MODE BADGE — centered bottom ───────────────────────*/
+.bac-mode-badge {
+  bottom: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* ── 15. HUD: ensure auto-reveal toggle doesn't overflow ─────*/
+.bac-ar-btn {
+  white-space: nowrap;
+}
+
+/* ── 16. Phase footer text — centered ───────────────────────*/
+.bac-phase-footer {
+  text-align: center;
+  padding: 12px 16px;
+}
+
+/* ── 17. EOR row — equal columns ────────────────────────────*/
+.bac-eor-row {
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   NATURAL HAND BADGE — inline, anchored to its hand container
+   No absolute positioning. Flows inside .bac-side above the header.
+════════════════════════════════════════════════════════════════ */
+
+/* Remove old absolute positioning entirely */
+.bac-natural {
+  display: none !important; /* deprecated — use bac-natural-inline */
+}
+
+.bac-natural-inline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 9px; font-weight: 800; letter-spacing: .18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  /* in-flow — part of the flex column of .bac-side */
+  flex-shrink: 0;
+  animation: naturalGlowAnim 1.2s cubic-bezier(0.22,1,0.36,1) both;
+}
+
+/* Player natural: blue accent */
+.bac-natural-player {
+  background: linear-gradient(135deg, rgba(30,60,120,.85), rgba(20,40,90,.85));
+  border: 1px solid rgba(96,165,250,.4);
+  color: #93c5fd;
+  box-shadow: 0 0 16px rgba(96,165,250,.12), 0 2px 8px rgba(0,0,0,.4);
+}
+
+/* Banker natural: red accent */
+.bac-natural-banker {
+  background: linear-gradient(135deg, rgba(120,20,20,.85), rgba(90,12,12,.85));
+  border: 1px solid rgba(239,68,68,.4);
+  color: #fca5a5;
+  box-shadow: 0 0 16px rgba(239,68,68,.12), 0 2px 8px rgba(0,0,0,.4);
+}
+
+/* Both sides natural (rare — 8+8, 8+9 etc): gold */
+.bac-natural-player.both-natural,
+.bac-natural-banker.both-natural {
+  background: linear-gradient(135deg, rgba(92,60,0,.9), rgba(55,36,0,.9));
+  border-color: rgba(251,191,36,.45);
+  color: #fde68a;
+  box-shadow: 0 0 20px rgba(251,191,36,.15), 0 2px 8px rgba(0,0,0,.4);
+}
+
+.bac-natural-star { font-size: 8px; opacity: .75; }
+.bac-natural-text { font-size: 10px; font-weight: 900; letter-spacing: .14em; }
+
+@keyframes naturalGlowAnim {
+  0%   { opacity: 0; transform: translateY(-8px) scale(.88);
+         box-shadow: 0 0 0 0 rgba(251,191,36,0); }
+  55%  { opacity: 1; transform: translateY(2px) scale(1.02); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 </style>

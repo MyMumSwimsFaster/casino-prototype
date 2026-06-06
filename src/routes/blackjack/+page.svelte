@@ -1,8 +1,11 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount }   from 'svelte';
+	import { goto }      from '$app/navigation';
 	import { fly, fade } from 'svelte/transition';
 	import { getBankroll, setBankroll, bjPayout, type BjHandResult } from '$lib/bankroll';
 	import { recordRoundDirect, type RoundOutcome } from '$lib/stats';
+	import { isLoggedIn } from '$lib/bankroll';
+	import { guestHistorySave } from '$lib/guestHistory';
 	import { sfx, getMuted, toggleMuted as _toggleMuted } from '$lib/sounds';
 	import GameOver from '$lib/components/GameOver.svelte';
 
@@ -179,7 +182,66 @@
 	let phase          = $state<Phase>('setup');
 	// ── Game-Over State ──────────────────────────────────────────────────────
 	// Buttons sperren wenn bankrupt (Countdown läuft oder Hand-Ansehen-Modus)
-	let isBankrupt = $derived(bankroll <= 0 && phase === 'result');
+	let isBankrupt  = $derived(bankroll <= 0 && phase === 'result');
+	let showRules   = $state(false);
+
+	// ── Forfeit / Leave Guard ─────────────────────────────────────────────────
+	// A hand is "active" the moment cards are dealt (phase leaves 'setup').
+	// Browser back/menu is intercepted; we show a confirm dialog instead.
+	let showForfeit = $state(false);
+	let isGameActive = $derived(
+		phase !== 'setup' && phase !== 'result' && phase !== 'redealing'
+	);
+
+	function handleMenuClick() {
+		if (isGameActive) { showForfeit = true; }
+		else              { goto('/'); }
+	}
+
+	async function forfeitHand() {
+		// Mark every unresolved hand as a loss, payout = 0
+		// Bankroll was already deducted at deal time, so no further deduction needed
+		hands = hands.map(h =>
+			h.done ? h : { ...h, result: 'lose', done: true, payout: 0 }
+		);
+		// If hole card not yet revealed, reveal it now
+		holeRevealed = true;
+		// Calculate net (bankroll already debited — payout is 0 so net = -totalBet)
+		const netLoss = bankrollBefore - bankroll; // negative number
+		// Save to history
+		if (!saved) {
+			saved = true;
+			const outcome: RoundOutcome = 'loss';
+			recordRoundDirect(outcome, -(mainBet + ppBet + dbBet + tfBet));
+			try {
+				await fetch('/api/save-game', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						game:           'blackjack',
+						bet:            mainBet,
+						playerHands:    hands.map(h => ({
+							cards:   h.cards.map(cardLabel),
+							score:   handScore(h.cards),
+							bet:     h.bet,
+							doubled: h.doubled,
+							result:  h.result ?? 'lose',
+							payout:  0,
+						})),
+						dealerCards:    dealerCards.map(cardLabel),
+						dealerScore:    handScore(dealerCards),
+						result:         'forfeited',
+						payout:         0,
+						bankrollBefore: bankrollBefore,
+						bankrollAfter:  bankroll,
+						netResult:      bankroll - bankrollBefore,
+					}),
+				});
+			} catch {}
+		}
+		showForfeit = false;
+		goto('/');
+	}
 	// gameOver wird NICHT sofort gezeigt — erst nach 5-Sekunden-Delay
 	let gameOver       = $state(false);
 	let showHand       = $state(false);   // "Hand ansehen" — Modal versteckt, Hand sichtbar
@@ -791,43 +853,62 @@
 			const outcome:RoundOutcome=isWin?'win':isLoss?'loss':'push';
 			recordRoundDirect(outcome,Math.round((h.payout-h.bet)*100)/100,1);
 		}
-		const totalPayout=hands.reduce((s,h)=>s+h.payout,0);
-		const netResult  =Math.round((bankroll-bankrollBefore)*100)/100;
-		try {
-			await fetch('/api/save-game',{
-				method:'POST', headers:{'Content-Type':'application/json'},
-				body:JSON.stringify({
-					game:'blackjack', bet:mainBet,
-					playerHands:hands.map(h=>({
-						cards:h.cards.map(cardLabel), score:handScore(h.cards),
-						bet:h.bet, doubled:h.doubled, result:h.result, payout:h.payout,
-					})),
-					dealerCards:dealerCards.map(cardLabel), dealerScore:handScore(dealerCards),
-					result:hands[0].result??'lose',
-					payout:Math.round(totalPayout*100)/100,
-					bankrollBefore:Math.round(bankrollBefore*100)/100,
-					bankrollAfter:Math.round(bankroll*100)/100,
-					netResult,
-					// Insurance
-					insuranceOffered, insuranceTaken,
-					insuranceBet:   insuranceTaken ? insuranceBet : 0,
-					insuranceResult,
-					insurancePayout:insuranceTaken&&insuranceResult==='won'?insurancePayout:0,
-					// Sidebets
-					perfectPairsBet:    ppBet,
-					perfectPairsResult: ppResult,
-					perfectPairsPayout: ppPayout,
-					dealerBustBet:    dbBet,
-					dealerBustResult: dbResult,
-					dealerBustPayout: dbPayout,
-					// 21+3
-					twentyOneThreeBet:    tfBet,
-					twentyOneThreeResult: tfResult,
-					twentyOneThreePayout: tfPayout,
-					twentyOneThreeCards:  tfCards,
-				})
+		const netResult = Math.round((bankroll-bankrollBefore)*100)/100;
+
+		if (isLoggedIn()) {
+			// Logged-in user: persist to MongoDB
+			try {
+				await fetch('/api/save-game',{
+					method:'POST', headers:{'Content-Type':'application/json'},
+					body:JSON.stringify({
+						game:'blackjack', bet:mainBet,
+						playerHands:hands.map(h=>({
+							cards:h.cards.map(cardLabel), score:handScore(h.cards),
+							bet:h.bet, doubled:h.doubled, result:h.result, payout:h.payout,
+						})),
+						dealerCards:  dealerCards.map(cardLabel),
+						dealerScore:  handScore(dealerCards),
+						result:       hands[0]?.result??'lose',
+						payout:       hands.reduce((s,h)=>s+h.payout,0),
+						bankrollBefore, bankrollAfter: bankroll, netResult,
+						insuranceOffered, insuranceTaken,
+						insuranceBet:    insuranceBet    ?? 0,
+						insuranceResult: insuranceResult ?? null,
+						insurancePayout: insurancePayout ?? 0,
+						perfectPairsBet:    ppBet,    perfectPairsResult: ppResult,  perfectPairsPayout: ppPayout,
+						dealerBustBet:      dbBet,    dealerBustResult:   dbResult,  dealerBustPayout:   dbPayout,
+						twentyOneThreeBet:  tfBet,    twentyOneThreeResult: tfResult, twentyOneThreePayout: tfPayout,
+						twentyOneThreeCards: tfCards ?? [],
+					})
+				});
+			} catch(e){ console.error('Failed to save:', e); }
+		} else {
+			// Guest: sessionStorage only — scoped to this browser tab/session
+			guestHistorySave({
+				game:           'blackjack',
+				bet:            mainBet,
+				playerHands:    hands.map(h => ({
+					cards:   h.cards.map(cardLabel),
+					score:   handScore(h.cards),
+					bet:     h.bet,
+					doubled: h.doubled,
+					result:  h.result,
+					payout:  h.payout,
+				})),
+				dealerCards:    dealerCards.map(cardLabel),
+				dealerScore:    handScore(dealerCards),
+				result:         hands[0]?.result ?? 'lose',
+				payout:         hands.reduce((s, h) => s + h.payout, 0),
+				bankrollBefore, bankrollAfter: bankroll, netResult,
+				perfectPairsBet: ppBet, perfectPairsResult: ppResult, perfectPairsPayout: ppPayout,
+				dealerBustBet:   dbBet, dealerBustResult:   dbResult, dealerBustPayout:   dbPayout,
+				twentyOneThreeBet: tfBet, twentyOneThreeResult: tfResult,
+				twentyOneThreePayout: tfPayout, twentyOneThreeCards: tfCards ?? [],
+				insuranceOffered, insuranceTaken, insuranceBet,
+				insuranceResult: insuranceResult ?? null,
+				insurancePayout: insurancePayout ?? 0,
 			});
-		} catch(e){console.error('Failed to save:',e);}
+		}
 	}
 
 	function handleGameOverReset() {
@@ -959,6 +1040,7 @@
      BLACKJACK — Casino Table Layout
      Script block is complete above. Template follows.
 ═══════════════════════════════════════════════════════ -->
+<svelte:window onkeydown={(e) => { if(e.key==='Escape') showRules=false; }} />
 <main class="bj-root">
 
   <!-- TOAST ─────────────────────────────────────────────── -->
@@ -968,16 +1050,26 @@
 
   <!-- HEADER ────────────────────────────────────────────── -->
   <header class="bj-header">
-    <a href="/" class="header-link">← Menü</a>
-    <div class="bankroll-pill">
-      <span class="bankroll-label">Balance</span>
-      <span class="bankroll-val {bankroll<=0?'red':bankroll<100?'amber':'green'}">
-        {bankroll.toFixed(2)} CHF
+    <!-- LEFT: menu -->
+    <button onclick={handleMenuClick} class="hud-menu-btn" aria-label="Menu">← Menü</button>
+
+    <!-- CENTER: bankroll — absolute so it's always truly centered -->
+    <div class="hud-balance">
+      <span class="hud-balance-label">BALANCE</span>
+      <span class="hud-balance-val {bankroll<=0?'red':bankroll<100?'amber':'green'}">
+        {bankroll.toFixed(2)} <span class="hud-balance-cur">CHF</span>
       </span>
     </div>
-    <button onclick={toggleMute} class="mute-btn" aria-label="Mute">
-      {muted ? '🔇' : '🔊'}
-    </button>
+
+    <!-- RIGHT: utility controls -->
+    <div class="hud-controls">
+      <button onclick={toggleMute} class="hud-ctrl-btn" aria-label="Mute" title={muted?'Unmute':'Mute'}>
+        {muted ? '🔇' : '🔊'}
+      </button>
+      <button onclick={() => showRules = true} class="hud-ctrl-btn" aria-label="Rules" title="Rules">
+        📖
+      </button>
+    </div>
   </header>
 
   <!-- TABLE ─────────────────────────────────────────────── -->
@@ -1208,6 +1300,9 @@
           {/if}
       </div>
 
+      <!-- CENTER ZONE (status, banners, insurance, result) -->
+      <div class="bj-table-center">
+
       <!-- STATUS -->
       {#if statusMsg}
         <div class="status-wrap" transition:fade={{duration:200}}>
@@ -1253,6 +1348,8 @@
           </div>
         </div>
       {/if}
+
+      </div><!-- /bj-table-center -->
 
       <!-- PLAYER HANDS -->
       <div class="player-area">
@@ -1394,6 +1491,99 @@
   </footer>
 </main>
 
+<!-- Forfeit confirm dialog -->
+{#if showForfeit}
+  <div class="forfeit-backdrop" transition:fade={{ duration: 200 }}>
+    <div class="forfeit-modal" transition:fly={{ y: 24, duration: 320 }}>
+      <div class="fm-icon">⚠</div>
+      <h2 class="fm-title">Active Hand</h2>
+      <p class="fm-body">You have an active hand in progress.<br>Leaving now will forfeit the hand and count as a <strong>loss</strong>.</p>
+      <div class="fm-actions">
+        <button onclick={() => showForfeit = false} class="fm-btn-continue">
+          ▶ Continue Playing
+        </button>
+        <button onclick={forfeitHand} class="fm-btn-forfeit">
+          Forfeit Hand &amp; Leave
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Rules Modal -->
+{#if showRules}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="rules-backdrop" onclick={(e)=>{ if((e.target as HTMLElement).classList.contains('rules-backdrop')) showRules=false; }}>
+    <div class="rules-modal" role="dialog" aria-modal="true">
+      <button onclick={() => showRules = false} class="rules-close" aria-label="Close">✕</button>
+
+      <div class="rules-header">
+        <span class="rules-icon">♠</span>
+        <h2 class="rules-title">Blackjack Rules</h2>
+      </div>
+
+      <div class="rules-section">
+        <h3 class="rules-heading" style="color:rgba(52,211,153,.7)">Goal</h3>
+        <p class="rules-text">Get as close to <strong style="color:#fff">21</strong> as possible without going over — and beat the dealer's hand.</p>
+      </div>
+
+      <div class="rules-divider"></div>
+
+      <div class="rules-section">
+        <h3 class="rules-heading" style="color:rgba(52,211,153,.7)">Card Values</h3>
+        <div class="rules-value-grid">
+          <div class="rvc"><span class="rvc-val">2–10</span><span class="rvc-key">Face value</span></div>
+          <div class="rvc"><span class="rvc-val">J·Q·K</span><span class="rvc-key">= 10</span></div>
+          <div class="rvc"><span class="rvc-val">A</span><span class="rvc-key">= 1 or 11</span></div>
+        </div>
+      </div>
+
+      <div class="rules-divider"></div>
+
+      <div class="rules-section">
+        <h3 class="rules-heading" style="color:rgba(52,211,153,.7)">Actions</h3>
+        <div class="rules-action-list">
+          {#each [['Hit','Take another card.','#16a34a'],['Stand','Keep your hand.','#4b5563'],['Double','2× bet, one card only.','#d97706'],['Split','Split equal cards into two hands.','#7c3aed']] as [name,desc,col]}
+            <div class="rules-action-row">
+              <span class="rar-badge" style="background:{col}">{name}</span>
+              <span class="rar-desc">{desc}</span>
+            </div>
+          {/each}
+        </div>
+      </div>
+
+      <div class="rules-divider"></div>
+
+      <div class="rules-section">
+        <h3 class="rules-heading" style="color:rgba(52,211,153,.7)">Payouts</h3>
+        <div class="rules-payout-list">
+          <div class="rules-payout-row"><span>Blackjack (A + 10-value)</span><span class="rpv rpv-gold">3:2</span></div>
+          <div class="rules-payout-row"><span>Win</span><span class="rpv rpv-green">1:1</span></div>
+          <div class="rules-payout-row"><span>Push</span><span class="rpv rpv-amber">Bet returned</span></div>
+          <div class="rules-payout-row"><span>Bust / Lose</span><span class="rpv rpv-dim">Lost</span></div>
+        </div>
+      </div>
+
+      <div class="rules-divider"></div>
+
+      <div class="rules-section">
+        <h3 class="rules-heading" style="color:rgba(52,211,153,.7)">Dealer</h3>
+        <p class="rules-text">Dealer draws until reaching <strong style="color:#fff">17 or higher</strong>. Stands on soft 17.</p>
+      </div>
+
+      <div class="rules-section" style="margin-top:14px">
+        <h3 class="rules-heading" style="color:rgba(139,92,246,.7)">Side Bets</h3>
+        <div class="rules-payout-list">
+          <div class="rules-payout-row"><span>Perfect Pairs</span><span class="rpv" style="color:#a78bfa">25:1 / 12:1 / 6:1</span></div>
+          <div class="rules-payout-row"><span>21+3</span><span class="rpv" style="color:#fbbf24">up to 100:1</span></div>
+          <div class="rules-payout-row"><span>Dealer Bust</span><span class="rpv" style="color:#f87171">2:1</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
+
 {#if gameOver}
   <!-- ── Full Game Over Modal ────────────────────────────── -->
   <div class="go-backdrop" transition:fade={{ duration: 350 }}>
@@ -1461,20 +1651,76 @@
 .dim    { color: rgba(255,255,255,0.25); }
 
 /* ── Header ────────────────────────────────────────── */
+/* ── HUD Header ─────────────────────────────────────────────────── */
 .bj-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 16px 6px;
-  background: rgba(0,0,0,0.45);
-  border-bottom: 1px solid rgba(255,255,255,0.04);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 8px 14px;
+  background: rgba(0,0,0,.48);
+  border-bottom: 1px solid rgba(255,255,255,.045);
   flex-shrink: 0; z-index: 20;
+  gap: 8px;
 }
-.header-link { font-size: 11px; color: rgba(74,222,128,0.7); text-decoration: none; letter-spacing:.05em; }
+
+/* LEFT — menu button */
+.hud-menu-btn {
+  justify-self: start;
+  background: none; border: none; cursor: pointer;
+  font-size: 11px; font-weight: 600; letter-spacing: .06em;
+  color: rgba(74,222,128,.65); padding: 0;
+  transition: color .15s; white-space: nowrap;
+}
+.hud-menu-btn:hover { color: #4ade80; }
+
+/* CENTER — balance, truly centered via grid */
+.hud-balance {
+  justify-self: center;
+  display: flex; flex-direction: column; align-items: center;
+  background: rgba(0,0,0,.5);
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 11px;
+  padding: 4px 16px 5px;
+  min-width: 130px;
+}
+.hud-balance-label {
+  font-size: 7px; font-weight: 800; letter-spacing: .22em;
+  color: rgba(255,255,255,.22); text-transform: uppercase;
+  line-height: 1; margin-bottom: 2px;
+}
+.hud-balance-val {
+  font-size: 15px; font-weight: 900; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.hud-balance-cur { font-size: 10px; font-weight: 500; opacity: .6; }
+
+/* RIGHT — utility control cluster */
+.hud-controls {
+  justify-self: end;
+  display: flex; align-items: center; gap: 6px;
+}
+.hud-ctrl-btn {
+  width: 30px; height: 30px; border-radius: 8px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.08);
+  font-size: 13px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s, border-color .15s;
+  color: rgba(255,255,255,.65);
+}
+.hud-ctrl-btn:hover {
+  background: rgba(255,255,255,.1);
+  border-color: rgba(255,255,255,.15);
+}
+
+/* Legacy aliases so existing code still works */
+.header-link { font-size:11px;color:rgba(74,222,128,.7);text-decoration:none;letter-spacing:.05em; }
 .header-link:hover { color:#4ade80; }
-.bankroll-pill { display:flex; flex-direction:column; align-items:center; background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.07); border-radius:10px; padding:4px 12px; }
-.bankroll-label { font-size:8px; letter-spacing:.15em; color:rgba(255,255,255,0.25); text-transform:uppercase; }
-.bankroll-val   { font-size:14px; font-weight:800; line-height:1.1; }
-.mute-btn { width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);font-size:13px;cursor:pointer;transition:background .15s;display:flex;align-items:center;justify-content:center; }
-.mute-btn:hover { background:rgba(255,255,255,0.1); }
+.bankroll-pill { display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:4px 12px; }
+.bankroll-label { font-size:8px;letter-spacing:.15em;color:rgba(255,255,255,.25);text-transform:uppercase; }
+.bankroll-val   { font-size:14px;font-weight:800;line-height:1.1; }
+.mute-btn { width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);font-size:13px;cursor:pointer;transition:background .15s;display:flex;align-items:center;justify-content:center; }
+.mute-btn:hover { background:rgba(255,255,255,.1); }
 
 /* ── Table ─────────────────────────────────────────── */
 .bj-table { flex:1; position:relative; overflow:hidden; }
@@ -2306,5 +2552,338 @@ em { font-style:normal; font-size:9px; margin-left:5px; }
   border-color: rgba(52,211,153,.3);
   box-shadow: 0 0 10px rgba(52,211,153,.12);
 }
+
+
+/* ── Leave Guard ──────────────────────────────────────────────────── */
+.header-link-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 11px; color: rgba(74,222,128,.7); letter-spacing: .05em;
+  padding: 0; transition: color .15s;
+}
+.header-link-btn:hover { color: #4ade80; }
+
+.forfeit-backdrop {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,.75); backdrop-filter: blur(5px);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.forfeit-modal {
+  width: min(340px,100%);
+  background: #060b12;
+  border: 1px solid rgba(239,68,68,.3);
+  border-radius: 22px; padding: 28px 24px 22px;
+  text-align: center;
+  box-shadow: 0 0 60px rgba(220,38,38,.12), 0 20px 60px rgba(0,0,0,.7);
+}
+.fm-icon  { font-size: 32px; margin-bottom: 10px; }
+.fm-title { font-size: 20px; font-weight: 900; color: #fbbf24; letter-spacing: .06em; margin: 0 0 10px; }
+.fm-body  { font-size: 12px; color: rgba(255,255,255,.5); line-height: 1.6; margin: 0 0 20px; }
+.fm-body strong { color: #f87171; }
+.fm-actions { display: flex; flex-direction: column; gap: 8px; }
+.fm-btn-continue {
+  background: linear-gradient(135deg,#166534,#14532d);
+  border: 1px solid rgba(74,222,128,.25);
+  border-radius: 13px; padding: 13px;
+  font-size: 14px; font-weight: 800; color: #fff; cursor: pointer;
+  transition: filter .15s;
+}
+.fm-btn-continue:hover { filter: brightness(1.12); }
+.fm-btn-forfeit {
+  background: rgba(127,29,29,.35);
+  border: 1px solid rgba(239,68,68,.22);
+  border-radius: 13px; padding: 11px;
+  font-size: 12px; font-weight: 700; color: rgba(248,113,113,.7); cursor: pointer;
+  transition: all .15s;
+}
+.fm-btn-forfeit:hover { background: rgba(153,27,27,.5); color: #fca5a5; }
+
+
+/* ── In-game Rules Modal ──────────────────────────────────────── */
+/* .rules-btn now uses .hud-ctrl-btn styles */
+
+.rules-backdrop {
+  position: fixed; inset: 0; z-index: 9990;
+  background: rgba(0,0,0,.72); backdrop-filter: blur(5px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  animation: rulesBackdropIn .2s ease both;
+}
+@keyframes rulesBackdropIn { from{opacity:0;} to{opacity:1;} }
+
+.rules-modal {
+  position: relative; width: 100%; max-width: 400px;
+  max-height: 86dvh; overflow-y: auto;
+  background: rgba(6,10,18,.96);
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 22px; padding: 26px 22px 22px;
+  box-shadow: 0 20px 70px rgba(0,0,0,.7);
+  animation: rulesModalIn .28s cubic-bezier(0.22,1,0.36,1) both;
+}
+@keyframes rulesModalIn {
+  from { opacity:0; transform: scale(.94) translateY(12px); }
+  to   { opacity:1; transform: scale(1)   translateY(0); }
+}
+.rules-modal::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(to right, transparent, rgba(180,150,40,.3), transparent);
+  border-radius: 22px 22px 0 0;
+}
+
+.rules-close {
+  position: absolute; top: 12px; right: 14px;
+  width: 26px; height: 26px; border-radius: 8px;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+  color: rgba(255,255,255,.4); font-size: 11px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .15s;
+}
+.rules-close:hover { background: rgba(255,255,255,.1); color: #fff; }
+
+.rules-header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+.rules-icon   { font-size: 22px; }
+.rules-title  { font-size: 17px; font-weight: 900; letter-spacing: .06em; margin: 0; }
+
+.rules-section { margin-bottom: 16px; }
+.rules-section:last-child { margin-bottom: 0; }
+.rules-heading {
+  font-size: 8px; font-weight: 800; letter-spacing: .25em;
+  text-transform: uppercase; margin: 0 0 8px;
+}
+.rules-text { font-size: 12px; color: rgba(255,255,255,.5); line-height: 1.6; margin: 0; }
+
+.rules-value-grid {
+  display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; margin-bottom: 0;
+}
+.rvc { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07);
+  border-radius: 10px; padding: 9px 5px; text-align: center; }
+.rvc-val { display: block; font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 2px; }
+.rvc-key { display: block; font-size: 9px; color: rgba(255,255,255,.3); }
+
+.rules-action-list { display: flex; flex-direction: column; gap: 5px; }
+.rules-action-row {
+  display: flex; align-items: center; gap: 9px;
+  background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.05);
+  border-radius: 10px; padding: 7px 11px;
+}
+.rar-badge {
+  border-radius: 6px; padding: 2px 8px;
+  font-size: 9px; font-weight: 800; color: #fff; white-space: nowrap; flex-shrink: 0;
+}
+.rar-desc { font-size: 11px; color: rgba(255,255,255,.45); }
+
+.rules-payout-list { display: flex; flex-direction: column; gap: 3px; }
+.rules-payout-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; color: rgba(255,255,255,.4);
+  padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.rules-payout-row:last-child { border-bottom: none; }
+.rpv { font-weight: 700; }
+.rpv-gold  { color: #fbbf24; } .rpv-green { color: #34d399; }
+.rpv-amber { color: #f59e0b; } .rpv-dim   { color: rgba(255,255,255,.25); }
+
+.rules-divider {
+  height: 1px; margin: 14px 0;
+  background: linear-gradient(to right, transparent, rgba(255,255,255,.07), transparent);
+}
+.rules-note {
+  font-size: 10px; color: rgba(255,255,255,.28); text-align: center; margin-top: 6px;
+}
+.rules-natural-box {
+  background: rgba(180,140,20,.1); border: 1px solid rgba(180,140,20,.22);
+  border-radius: 10px; padding: 9px 13px;
+  font-size: 11px; color: rgba(255,220,100,.65);
+}
+.rules-example-list { display: flex; flex-direction: column; gap: 4px; }
+.rules-example-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; color: rgba(255,255,255,.4);
+}
+.rex-cards { color: rgba(255,255,255,.7); font-weight: 600; }
+.rex-arrow { color: rgba(255,255,255,.2); }
+.rex-score { color: #34d399; font-weight: 700; }
+
+
+/* ════════════════════════════════════════════════════════════════════
+   PREMIUM TABLE LAYOUT — reduces empty space, enlarges cards,
+   creates a proper dealer → arc → player composition.
+   These rules override earlier declarations via more specific selectors
+   or by appearing later in the cascade.
+════════════════════════════════════════════════════════════════════ */
+
+/* ── Root: table is now a proper flex column for game layout ──── */
+.bj-table {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* ── Dealer zone: top, compact, centered ─────────────────────── */
+.dealer-area {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  flex-shrink: 0;
+  padding: 16px 12px 10px;
+  z-index: 10;
+}
+
+/* ── Center zone: fills the middle with atmosphere ───────────── */
+.bj-table-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-height: 0;
+}
+
+/* Arc separator line (casino table center marking) */
+.bj-table-center::before {
+  content: '';
+  position: absolute;
+  left: 8%; right: 8%;
+  top: 50%;
+  height: 1px;
+  background: linear-gradient(to right,
+    transparent,
+    rgba(180,150,40,.12) 25%,
+    rgba(180,150,40,.22) 50%,
+    rgba(180,150,40,.12) 75%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+/* ── Player zone: bottom, compact ────────────────────────────── */
+.player-area {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  flex-shrink: 0;
+  padding: 10px 12px 14px;
+  z-index: 10;
+}
+
+/* ── Status message: sits in the center zone ─────────────────── */
+.status-wrap {
+  position: absolute !important;
+  inset-x: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 15;
+}
+
+/* ── Insurance panel: absolute in center ─────────────────────── */
+.ins-panel {
+  position: absolute !important;
+  top: 50% !important;
+  left: 12px; right: 12px;
+  transform: translateY(-50%);
+  z-index: 25;
+}
+
+/* ── Result overlay: centered (already correct, reinforce) ────── */
+.result-overlay {
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  width: min(320px, 92%) !important;
+  z-index: 20;
+}
+
+/* ── ENLARGED CARDS — ~35% bigger ────────────────────────────── */
+.crd {
+  width: 76px !important;
+  height: 110px !important;
+  border-radius: 9px !important;
+}
+.cr-tl { font-size: 13px !important; top: 4px !important; left: 6px !important; }
+.cr-s  { font-size: 26px !important; }
+.cr-br { font-size: 13px !important; bottom: 4px !important; right: 6px !important; }
+
+/* Tighter overlap for larger cards */
+.cards-fan .card-ol { margin-left: -22px !important; }
+
+/* ── Score pill: more prominent ──────────────────────────────── */
+.score-pill {
+  min-width: 44px !important;
+  padding: 4px 14px !important;
+  font-size: 16px !important;
+  font-weight: 900 !important;
+}
+
+/* ── Zone labels: slightly more visible ──────────────────────── */
+.zone-lbl {
+  font-size: 9px !important;
+  letter-spacing: .22em !important;
+  color: rgba(255,255,255,.22) !important;
+}
+
+/* ── Hand meta: tighter ──────────────────────────────────────── */
+.hand-meta { gap: 10px !important; }
+.hand-bet  { font-size: 11px !important; }
+.hand-result { font-size: 14px !important; }
+
+/* ── Setup layer: use same flex layout ───────────────────────── */
+.setup-layer {
+  position: absolute !important;
+  inset: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  padding-bottom: 8px !important;
+}
+
+/* ── Sidebet banners: reposition relative to center ─────────── */
+.sb-banner { position: absolute !important; left: 14px; right: 14px; z-index: 20; }
+.sb-gold   { top: 30% !important; }
+.sb-violet { top: 38% !important; }
+
+/* ── Insurance status: relative to center ───────────────────── */
+.ins-status {
+  position: absolute !important;
+  top: 15% !important;
+  left: 14px; right: 14px;
+  z-index: 20;
+}
+
+/* ── BJ glow / bust on enlarged cards ───────────────────────── */
+.bj-glow  { animation: bjGlowV2 900ms cubic-bezier(0.22,1,0.36,1) both; }
+.bust-shake { animation: bustShakeV2 500ms cubic-bezier(0.36,0.07,0.19,0.97) both; }
+
+/* ── Dealer area: ambient glow behind enlarged cards ─────────── */
+.dealer-area::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 90% 70% at 50% 50%,
+    rgba(6,50,35,.22) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* ── Player area: ambient glow ───────────────────────────────── */
+.player-area::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 90% 70% at 50% 50%,
+    rgba(6,78,59,.18) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* ── Hand wrap: slightly more padding ───────────────────────── */
+.hand-wrap { gap: 6px !important; }
+
+/* ── Badge sizes match larger cards ─────────────────────────── */
+.badge-turn, .badge-dbl, .badge-hand { font-size: 9px !important; }
 
 </style>

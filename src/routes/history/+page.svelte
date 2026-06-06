@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount }          from 'svelte';
+	import { guestHistoryLoad, guestHistoryClear } from '$lib/guestHistory';
 
 	// ─── Types (identical to original) ───────────────────────────────────────
 	interface PlayerHandRecord {
@@ -179,6 +180,14 @@
 	async function clearHistory() {
 		if (!confirm('Delete all history?')) return;
 		errorMsg = '';
+		const isGuest = !(data as any)?.user;
+		if (isGuest) {
+			// Guest: clear sessionStorage only — no server call needed
+			guestHistoryClear();
+			games = [];
+			return;
+		}
+		// Logged-in: delete from MongoDB (scoped to this user by the server)
 		try {
 			const res = await fetch('/api/clear-history', { method: 'POST' });
 			if (!res.ok) throw new Error();
@@ -189,6 +198,13 @@
 	}
 
 	onMount(() => {
+		// If guest (no user in server data), load history from sessionStorage
+		const isGuest = !(data as any)?.user;
+		if (isGuest) {
+			const guestGames = guestHistoryLoad();
+			// Cast to GameRecord[] — the shape is compatible
+			games = guestGames as unknown as GameRecord[];
+		}
 		setTimeout(() => { mounted = true; }, 60);
 		setTimeout(() => runCountUp(), 400);
 	});

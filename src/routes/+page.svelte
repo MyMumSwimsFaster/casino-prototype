@@ -13,6 +13,58 @@
 	let wr     = $derived(winRate(stats));
 	let broke  = $derived(bankroll <= 0);
 
+	// ── Auth: read cached user from localStorage (set on login/register) ────────
+	import { getCachedUser, clearUserSession, setBankroll } from '$lib/bankroll';
+
+	let user = $state(getCachedUser());
+
+	// On mount: verify session is still valid with server, sync bankroll
+	onMount(async () => {
+		bankroll = getBankroll();
+		stats    = getStats();
+		// Refresh user session from server (handles cookie expiry etc.)
+		try {
+			const res  = await fetch('/api/auth/me');
+			const data = await res.json();
+			if (data.user) {
+				user     = data.user;
+				// Sync bankroll from server — server is source of truth for logged-in users
+				if (typeof data.user.bankroll === 'number') {
+					bankroll = data.user.bankroll;
+					setBankroll(data.user.bankroll);
+				}
+			} else {
+				// Cookie expired or invalid — clear cached user
+				clearUserSession();
+				user = null;
+			}
+		} catch {}
+		const onVisible = () => { if (document.visibilityState === 'visible') loadFromStorage(); };
+		document.addEventListener('visibilitychange', onVisible);
+		return () => document.removeEventListener('visibilitychange', onVisible);
+	});
+
+	async function handleLogout() {
+		await fetch('/api/auth/logout', { method: 'POST' });
+		// 1. Clear localStorage: wipe casino_user, set bankroll = 2000
+		clearUserSession();
+		// 2. Reset all reactive state immediately — no stale UI
+		user     = null;
+		bankroll = getBankroll();   // reads freshly written 2000
+		stats    = { handsPlayed:0, wins:0, losses:0, pushes:0, biggestWin:0, sessionStartBankroll:2000 };
+		// 3. Reset animated display values instantly (skip count-up from old values)
+		animBankroll = bankroll;
+		animProfit   = 0;
+		animHands    = 0;
+		animWins     = 0;
+		animLosses   = 0;
+		animPushes   = 0;
+		animBestWin  = 0;
+		animWR       = 0;
+		// 4. Invalidate server data (history, user session check)
+		await invalidateAll();
+	}
+
 	// Animated counter values
 	let animBankroll  = $state(0);
 	let animProfit    = $state(0);
@@ -130,6 +182,21 @@
 				<span class="hd-line"></span>
 				<span class="hd-diamond">◆</span>
 				<span class="hd-line"></span>
+			</div>
+
+			<!-- User bar -->
+			<div class="user-bar">
+				{#if user}
+					<a href="/account" class="ub-user">
+						<span class="ub-avatar">{user.username[0].toUpperCase()}</span>
+						<span class="ub-name">{user.username}</span>
+					</a>
+					<button onclick={handleLogout} class="ub-logout">Sign Out</button>
+				{:else}
+					<a href="/login"    class="ub-login">Sign In</a>
+					<a href="/register" class="ub-register">Register</a>
+					<span class="ub-guest">or continue as guest</span>
+				{/if}
 			</div>
 		</header>
 
@@ -783,4 +850,46 @@
 	transition:all .15s;
 }
 .modal-close-btn:hover { background:rgba(255,255,255,.09); color:rgba(255,255,255,.8); }
+
+/* ── Auth User Bar ──────────────────────────────────────────────────────── */
+.user-bar {
+  display: flex; align-items: center; justify-content: center;
+  gap: 8px; margin-top: 14px; flex-wrap: wrap;
+}
+.ub-avatar {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: rgba(180,150,40,.3);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 900; color: #fbbf24;
+  flex-shrink: 0;
+}
+.ub-user {
+  display: flex; align-items: center; gap: 6px;
+  text-decoration: none;
+  background: rgba(180,150,40,.07); border: 1px solid rgba(180,150,40,.18);
+  border-radius: 999px; padding: 4px 12px 4px 5px;
+  transition: all .15s;
+}
+.ub-user:hover { background: rgba(180,150,40,.13); border-color: rgba(180,150,40,.3); }
+.ub-name { font-size: 11px; font-weight: 700; color: rgba(255,255,255,.65); letter-spacing: .06em; }
+.ub-logout {
+  font-size: 10px; color: rgba(248,113,113,.5);
+  background: none; border: 1px solid rgba(239,68,68,.15);
+  border-radius: 999px; padding: 4px 12px; cursor: pointer; transition: all .15s;
+}
+.ub-logout:hover { color: #f87171; border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.06); }
+.ub-login {
+  font-size: 11px; font-weight: 700; color: rgba(52,211,153,.75);
+  background: rgba(52,211,153,.07); border: 1px solid rgba(52,211,153,.2);
+  border-radius: 999px; padding: 5px 14px; text-decoration: none; transition: all .15s;
+}
+.ub-login:hover { background: rgba(52,211,153,.14); border-color: rgba(52,211,153,.35); }
+.ub-register {
+  font-size: 11px; font-weight: 700; color: rgba(220,120,30,.75);
+  background: rgba(220,120,30,.07); border: 1px solid rgba(220,120,30,.2);
+  border-radius: 999px; padding: 5px 14px; text-decoration: none; transition: all .15s;
+}
+.ub-register:hover { background: rgba(220,120,30,.14); border-color: rgba(220,120,30,.35); }
+.ub-guest { font-size: 9px; color: rgba(255,255,255,.16); letter-spacing: .08em; }
+
 </style>
