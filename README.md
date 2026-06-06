@@ -1,280 +1,406 @@
-# Royal Table – Casino Prototype
+# Projektdokumentation - Royal Table
 
-## Projektbeschreibung
+## Inhaltsverzeichnis
 
-Royal Table ist ein moderner Casino-Prototyp, der im Rahmen des Moduls Prototyping entwickelt wurde.
-
-Ziel des Projekts war die Entwicklung einer webbasierten Anwendung mit einem vollständigen End-to-End-Workflow. Die Anwendung ermöglicht das Spielen von Blackjack und Baccarat, die Verwaltung von Benutzerkonten, die Speicherung von Spielständen sowie die Analyse vergangener Spielrunden.
-
-Während des Projekts wurde besonderer Wert auf Benutzerfreundlichkeit, visuelles Feedback, moderne UI-Gestaltung sowie die Umsetzung eines realistischen Casino-Erlebnisses gelegt.
+1. Ausgangslage
+2. Lösungsidee
+3. Vorgehen & Artefakte
+   1. Understand & Define
+   2. Sketch
+   3. Decide
+   4. Prototype
+   5. Validate
+4. Erweiterungen
+5. Projektorganisation
+6. KI-Deklaration
+7. Anhang
 
 ---
 
-# Ziel des Prototyps
+# 1. Ausgangslage
 
-Ziel war die Umsetzung eines funktionsfähigen Casino-Prototyps mit folgenden Kernanforderungen:
+## Problem
 
-1. Benutzer registrieren oder als Gast spielen
-2. Spiel auswählen
+Online-Casino-Spiele bestehen aus mehreren zusammenhängenden Workflows wie Benutzerverwaltung, Spielablauf, Datenspeicherung und Statistiken. Ziel dieses Projekts war die Entwicklung eines vollständigen webbasierten Casino-Prototyps, der diese Abläufe in einer modernen Benutzeroberfläche vereint.
+
+## Ziele
+
+- Entwicklung eines vollständigen End-to-End-Workflows
+- Umsetzung mit SvelteKit und MongoDB
+- Speicherung von Spielständen und Benutzerdaten
+- Bereitstellung einer benutzerfreundlichen Oberfläche
+- Deployment einer lauffähigen Webanwendung
+
+## Primäre Zielgruppe
+
+Spielerinnen und Spieler, welche eine einfache Casino-Anwendung nutzen möchten.
+
+---
+
+# 2. Lösungsidee
+
+## Kernfunktionalität
+
+Die Anwendung ermöglicht:
+
+- Registrierung und Login
+- Spielen von Blackjack
+- Spielen von Baccarat
+- Speicherung von Spielrunden
+- Anzeige einer persönlichen Spielhistorie
+- Statistische Auswertung der Spielaktivitäten
+
+## Abgrenzung
+
+Es handelt sich um einen Prototyp und nicht um ein Echtgeld-Casino. Der Fokus liegt auf der technischen Umsetzung und dem Benutzererlebnis.
+
+---
+
+# 3. Vorgehen & Artefakte
+
+## 3.1 Understand & Define
+
+### Zielgruppenverständnis
+
+Die Zielgruppe besteht aus Personen, welche einfache Casino-Spiele direkt im Browser spielen möchten.
+
+### Wesentliche Erkenntnisse
+
+- Einfache Navigation ist wichtig.
+- Spielregeln müssen jederzeit verfügbar sein.
+- Spieler erwarten visuelles Feedback.
+- Eine Historie erhöht die Nachvollziehbarkeit der gespielten Runden.
+
+---
+
+## 3.2 Sketch
+
+### Variantenüberblick
+
+Zu Beginn wurden mehrere Layout-Varianten erstellt und miteinander verglichen.
+
+### Skizzen
+
+Die ersten Entwürfe wurden in Figma erstellt. Dabei wurden unterschiedliche Anordnungen von Navigation, Spielbereich und Statistiken getestet.
+
+---
+
+## 3.3 Decide
+
+### Gewählte Variante & Begründung
+
+Gewählt wurde ein modernes Casino-Design mit dunklem Farbschema, goldenen Akzenten und klarer Trennung der einzelnen Bereiche.
+
+### End-to-End-Ablauf
+
+1. Benutzer registriert sich oder spielt als Gast
+2. Auswahl eines Spiels
 3. Einsatz platzieren
-4. Spielrunde durchführen
+4. Runde spielen
 5. Ergebnis anzeigen
-6. Daten speichern
-7. Spielhistorie anzeigen
-8. Benutzerbezogene Statistiken verwalten
+6. Speicherung der Daten
+7. Anzeige der Historie
 
----
+### Mockup
 
-# Verwendete Technologien
-
-* SvelteKit
-* TypeScript
-* Tailwind CSS
-* MongoDB Atlas
-* Netlify
-* Git
-* GitHub
-* Visual Studio Code
-
----
-
-# Umgesetzte Funktionen
-
-## Benutzerverwaltung
-
-* Registrierung neuer Benutzer
-* Login und Logout
-* Passwort-Hashing
-* Session-Verwaltung
-* Persistente Speicherung der Benutzerdaten
-
-## Blackjack
-
-* Hit
-* Stand
-* Double Down
-* Split
-* Insurance
-* Side Bets
-* Blackjack-Erkennung
-* Dealer Peek
-* Automatische Dealer-Logik
-
-## Baccarat
-
-* Player Bet
-* Banker Bet
-* Tie Bet
-* Automatische Baccarat-Regeln
-* Natural Hands
-* Cinematic Card Reveal
-* Autoplay-Modus
-* Manuelle Kartenaufdeckung
-
-## Spielhistorie
-
-* Speicherung gespielter Runden
-* Anzeige vergangener Spiele
-* Benutzerbezogene Historie
-* Session Journal
-
-## Statistik
-
-* Anzahl gespielter Hände
-* Gewinnrate
-* Anzahl Siege
-* Anzahl Niederlagen
-* Gesamtgewinn / Gesamtverlust
-* Beste Runde
-
-## Benutzeroberfläche
-
-* Modernes Casino-Design
-* Animationen
-* Soundeffekte
-* Visuelles Feedback
-* Responsive Gestaltung
-* Konsistente Benutzerführung
-
----
-
-# Datenbank
-
-Die Anwendung verwendet MongoDB Atlas zur persistenten Datenspeicherung.
-
-Gespeichert werden unter anderem:
-
-* Benutzerkonten
-* Passwort-Hashes
-* Spielhistorie
-* Session-Daten
-* Statistiken
-* Spielresultate
-
----
-
-# Deployment
-
-Die Anwendung wurde mit Netlify veröffentlicht und ist online verfügbar.
-
-Deployment URL:
-
-https://casino-prototype.netlify.app/
-
----
-
-# GitHub Repository
-
-https://github.com/MyMumSwimsFaster/casino-prototype
-
----
-
-# Vorgehen
-
-Die Entwicklung erfolgte anhand der im Modul vermittelten Phasen:
-
-## Understand / Define
-
-Analyse der Anforderungen und Definition der Kernfunktionen eines Casino-Prototyps.
-
-## Sketch
-
-Erstellung von Mockups und ersten Oberflächenentwürfen.
-
-## Decide
-
-Auswahl der finalen Lösung sowie Definition der wichtigsten Workflows.
-
-## Prototype
-
-Implementierung der Anwendung mit SvelteKit, MongoDB und Netlify.
-
-## Validate
-
-Durchführung einer Usability-Evaluation mit drei Testpersonen sowie anschliessende Analyse und Verbesserung der Anwendung auf Basis der gewonnenen Erkenntnisse.
-
----
-
-# Bezug zum Mockup
-
-Die Anwendung basiert auf einem zuvor erstellten Figma-Prototyp. Während der Entwicklungsphase wurden verschiedene Iterationen durchgeführt, um die Benutzerführung, die Spielabläufe sowie das visuelle Design zu verbessern.
-
-Interaktiver Prototyp (Figma):
+Interaktiver Prototyp:
 
 https://www.figma.com/proto/GhyQvLrSNPlWEVNULbYodb/Projekt?node-id=0-1&t=PKECiV8w4YWocnhQ-1
 
-Figma-Projekt:
+Figma-Datei:
 
 https://www.figma.com/design/GhyQvLrSNPlWEVNULbYodb/Projekt?node-id=0-1&m=dev&t=dxnL578Rf4Mhkrzy-1
 
-Im Verlauf der Entwicklung wurden verschiedene Elemente gegenüber dem ursprünglichen Entwurf angepasst. Dazu gehören insbesondere die Navigation, das visuelle Feedback während des Spiels, die Gestaltung der History, die Benutzerkonten sowie zusätzliche Funktionen wie Side Bets, Auto Play, Soundeffekte und die persistente Speicherung von Spielständen.
+---
 
-Das finale Produkt orientiert sich weiterhin am ursprünglichen Konzept, wurde jedoch aufgrund von Usability-Erkenntnissen, technischem Feedback sowie zusätzlichen Erweiterungen kontinuierlich weiterentwickelt.
+## 3.4 Prototype
+
+### 3.4.1 Entwurf (Design)
+
+#### Informationsarchitektur
+
+Die Anwendung besteht aus:
+
+- Lobby / Startseite
+- Login
+- Registrierung
+- Blackjack
+- Baccarat
+- History
+- Account
+
+#### User Interface Design
+
+Wichtige Eigenschaften:
+
+- Modernes Casino-Layout
+- Dunkles Design
+- Goldene Hervorhebungen
+- Animationen
+- Soundeffekte
+- Responsives Layout
+
+#### Designentscheidungen
+
+- Fokus auf Benutzerfreundlichkeit
+- Klare visuelle Rückmeldungen
+- Einheitliche Gestaltung aller Seiten
 
 ---
 
-# Usability Evaluation
+### 3.4.2 Umsetzung (Technik)
 
-Die Anwendung wurde mit drei Testpersonen unterschiedlicher Erfahrungsstufen evaluiert.
+#### Technologie-Stack
 
-Während der Durchführung wurden zentrale Workflows beobachtet und dokumentiert. Die Evaluation umfasste Aufgaben zu Navigation, Spielverständnis, Blackjack, Baccarat, History sowie Benutzerführung.
+- SvelteKit
+- TypeScript
+- Tailwind CSS
+- MongoDB Atlas
 
-Auf Basis der Erkenntnisse wurden verschiedene Verbesserungen umgesetzt, beispielsweise:
+#### Tooling
 
-* Optimierung der Benutzerführung
-* Verbesserungen im Layout
-* Klareres visuelles Feedback
-* Anpassungen bei Animationen
-* Erweiterung von Hilfestellungen und Informationen
+- Visual Studio Code
+- Git
+- GitHub
+- Netlify
 
-Die vollständige Evaluation befindet sich im separaten Dokument der Usability-Evaluation.
+#### Struktur & Komponenten
+
+Wichtige Bereiche:
+
+- Authentifizierung
+- Blackjack-Komponenten
+- Baccarat-Komponenten
+- History-System
+- Session-Verwaltung
+- Datenbankanbindung
+
+#### Daten & Schnittstellen
+
+Gespeichert werden:
+
+- Benutzerkonten
+- Passwort-Hashes
+- Spielresultate
+- Historie
+- Statistiken
+- Session-Daten
+
+#### Deployment
+
+https://casino-prototype.netlify.app/
+
+#### Besondere Entscheidungen
+
+- Gastmodus ohne Registrierung
+- Persistente Benutzerkonten
+- Separate Historie für registrierte Benutzer
+- Erweiterung um Baccarat und Statistiken
 
 ---
 
-# Erweiterungen über den Mindestumfang hinaus
+## 3.5 Validate
 
-Folgende Funktionen wurden zusätzlich zum Mindestumfang umgesetzt:
+### URL der getesteten Version
 
-* Benutzerkonten
-* Authentifizierung
-* MongoDB-basierte Sessions
-* Baccarat als zweites Spiel
-* Side Bets
-* Sound-System
-* Autoplay-Modus
-* Erweiterte Statistiken
-* Benutzerbezogene Historie
-* Premium Casino User Interface
-* Verbesserte Animationen und visuelles Feedback
+https://casino-prototype.netlify.app/
+
+### Ziele der Prüfung
+
+- Verständnis der Navigation
+- Verständlichkeit der Spielabläufe
+- Bedienbarkeit der Anwendung
+- Auffindbarkeit wichtiger Funktionen
+
+### Vorgehen
+
+Moderierte Usability-Tests.
+
+### Stichprobe
+
+Drei Testpersonen mit unterschiedlichem Erfahrungsstand.
+
+### Aufgaben / Szenarien
+
+- Registrierung durchführen
+- Login durchführen
+- Blackjack spielen
+- Baccarat spielen
+- Historie aufrufen
+- Statistiken prüfen
+
+### Kennzahlen & Beobachtungen
+
+Die meisten Aufgaben konnten erfolgreich abgeschlossen werden. Verbesserungspotenzial zeigte sich insbesondere bei der Auffindbarkeit einzelner Funktionen und der Benutzerführung.
+
+### Zusammenfassung der Resultate
+
+Die Anwendung wurde insgesamt positiv bewertet. Die Testpersonen konnten alle wesentlichen Workflows erfolgreich abschliessen.
+
+### Abgeleitete Verbesserungen
+
+- Verbesserte Navigation
+- Zusätzliche Hinweise für Benutzer
+- Optimierung der History
+- Erweiterung der Spielinformationen
+
+Die vollständige Evaluation befindet sich im separaten Dokument.
 
 ---
 
-# Einsatz von KI-Tools
+# 4. Erweiterungen
 
-Für die Entwicklung wurden KI-Tools unterstützend eingesetzt.
+## 4.1 Benutzerkonten
 
-Verwendete Werkzeuge:
+### Beschreibung & Nutzen
 
-* ChatGPT
-* Claude
+Registrierte Benutzer erhalten eine persistente Historie und persönliche Statistiken.
 
-Die KI wurde insbesondere genutzt für:
+### Wo umgesetzt
 
-* Strukturierung des Projekts
-* Unterstützung bei der Entwicklung
-* Fehlersuche und Debugging
-* Optimierung von UI und UX
-* Deployment-Probleme
-* Dokumentation
+- Frontend
+- Backend
+- MongoDB
+
+### Aus Evaluation abgeleitet?
+
+Nein
+
+---
+
+## 4.2 Baccarat
+
+### Beschreibung & Nutzen
+
+Zusätzlich zu Blackjack wurde Baccarat implementiert.
+
+### Wo umgesetzt
+
+Frontend und Backend.
+
+### Aus Evaluation abgeleitet?
+
+Nein
+
+---
+
+## 4.3 Sound-System
+
+### Beschreibung & Nutzen
+
+Verbessert das Spielerlebnis durch akustisches Feedback.
+
+### Wo umgesetzt
+
+Frontend.
+
+### Aus Evaluation abgeleitet?
+
+Teilweise.
+
+---
+
+## 4.4 Erweiterte Statistiken
+
+### Beschreibung & Nutzen
+
+Anzeige von Gewinnrate, Gesamtgewinn, Niederlagen und Best-Win.
+
+### Wo umgesetzt
+
+Frontend, Backend und MongoDB.
+
+### Aus Evaluation abgeleitet?
+
+Ja
+
+---
+
+# 5. Projektorganisation
+
+## Repository
+
+GitHub Repository:
+
+https://github.com/MyMumSwimsFaster/casino-prototype
+
+## Commit-Praxis
+
+Während der Entwicklung wurden regelmässig Commits erstellt und auf GitHub veröffentlicht.
+
+---
+
+# 6. KI-Deklaration
+
+## 6.1 KI-Tools
+
+### Eingesetzte Tools
+
+- ChatGPT
+- Claude
+
+### Zweck & Umfang
+
+Die KI wurde verwendet für:
+
+- Projektstruktur
+- Datenbankanbindung
+- Authentifizierung
+- API-Routen
+- Debugging
+- Deployment
+- Dokumentation
+- UI/UX Verbesserungen
+
+### Eigene Leistung
 
 Alle generierten Vorschläge wurden geprüft, getestet und eigenständig angepasst.
 
-Die Verantwortung für den finalen Code lag jederzeit beim Entwickler.
+---
+
+## 6.2 Prompt-Vorgehen
+
+Die KI wurde gezielt eingesetzt, um technische Probleme effizient zu lösen und Entwicklungsprozesse zu beschleunigen.
+
+Typische Einsatzbereiche:
+
+- Projektplanung
+- MongoDB Integration
+- Authentifizierung
+- Fehleranalyse
+- UI Optimierung
+- Deployment
+
+Beispielprompts:
+
+- "Erstelle eine modulare SvelteKit-Struktur für einen Casino-Prototypen."
+- "Wie implementiere ich Benutzerkonten mit MongoDB?"
+- "Analysiere den Fehler beim Netlify Deployment."
+- "Wie kann eine persistente Spielhistorie umgesetzt werden?"
 
 ---
 
-# Promptvorgehen / KI-Workflow
+## 6.3 Reflexion
 
-Während der Entwicklung wurde KI gezielt eingesetzt, um technische Probleme effizient zu lösen und Entwicklungsprozesse zu beschleunigen.
-
-Einsatzbereiche:
-
-* Planung der Projektstruktur
-* Entwicklung der Datenbankanbindung
-* Authentifizierung
-* API-Routen
-* MongoDB Integration
-* UI-Verbesserungen
-* Deployment
-* Fehleranalyse
-* Dokumentation
-
-Beispiele verwendeter Prompts:
-
-* „Erstelle eine modulare SvelteKit-Struktur für einen Casino-Prototypen.“
-* „Wie implementiere ich Benutzerkonten mit MongoDB in SvelteKit?“
-* „Analysiere den Fehler beim Netlify Deployment.“
-* „Wie kann eine persistente Spielhistorie umgesetzt werden?“
-* „Verbessere die Benutzerführung und das visuelle Feedback.“
-* „Wie kann Baccarat mit automatischen Regeln umgesetzt werden?“
-
-Die generierten Vorschläge wurden analysiert, getestet und den Projektanforderungen angepasst.
+Der Einsatz von KI beschleunigte die Entwicklung erheblich und half insbesondere bei technischen Problemen. Gleichzeitig war eine kontinuierliche Überprüfung der generierten Vorschläge notwendig, um Fehler zu vermeiden und die Anforderungen korrekt umzusetzen.
 
 ---
 
-# Aktueller Stand
+# 7. Anhang
 
-Der Prototyp ist funktionsfähig und online verfügbar.
+## Quellen
 
-Alle zentralen Workflows funktionieren vollständig:
+- SvelteKit Dokumentation
+- MongoDB Dokumentation
+- Tailwind CSS Dokumentation
+- Netlify Dokumentation
 
-* Registrierung
-* Login
-* Blackjack
-* Baccarat
-* Speicherung von Spielrunden
-* Historie
-* Statistiken
-* Deployment
+## Mockup
 
-Der entwickelte Funktionsumfang übersteigt den definierten Mindestumfang deutlich.
+Figma:
+
+https://www.figma.com/design/GhyQvLrSNPlWEVNULbYodb/Projekt?node-id=0-1&m=dev&t=dxnL578Rf4Mhkrzy-1
+
+Interaktiver Prototyp:
+
+https://www.figma.com/proto/GhyQvLrSNPlWEVNULbYodb/Projekt?node-id=0-1&t=PKECiV8w4YWocnhQ-1
